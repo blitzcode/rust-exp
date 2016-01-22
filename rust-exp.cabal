@@ -1,0 +1,42 @@
+name:                rust-exp
+version:             0.1.0.0
+synopsis:            Haskell OpenGL / GLFW application wrapping around a few Rust experiments
+-- description:
+license:             MIT
+license-file:        LICENSE
+author:              Tim C. Schroeder
+maintainer:          www.blitzcode.net
+-- copyright:
+category:            Graphics
+build-type:          Simple
+-- extra-source-files:
+cabal-version:       >=1.10
+
+executable rust-exp
+  main-is:             Main.hs
+  build-depends:       base >=4.8 && <5,
+                       mtl >= 2.2.1,
+                       transformers,
+                       monad-control,
+                       linear,
+                       GLFW-b,
+                       OpenGL,
+                       OpenGLRaw >= 3.0.0.0,
+                       stm,
+                       vector,
+                       lens,
+                       time,
+                       ansi-terminal,
+                       text,
+                       bytestring,
+                       containers,
+                       async,
+                       template-haskell,
+                       resourcet,
+                       directory,
+                       filepath,
+                       deepseq,
+                       JuicyPixels
+  default-language:    Haskell2010
+  ghc-options:         -Wall -rtsopts -O2 -threaded -dynamic
+  ghc-prof-options:    -fprof-auto -caf-all

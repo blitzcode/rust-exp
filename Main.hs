@@ -1,5 +1,5 @@
 
-{-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE RecordWildCards, FlexibleContexts #-}
 
 module Main (main) where
 
@@ -18,6 +18,8 @@ import Font
 import FrameBuffer
 import QuadRendering
 import qualified BoundedSequence as BS
+import Experiment
+import RustExperiments
 
 runOnAllCores :: IO ()
 runOnAllCores = GHC.Conc.getNumProcessors >>= setNumCapabilities
@@ -50,14 +52,20 @@ main = do
        in withWindow w h "Viewer" _aeGLFWEventsQueue $ \_aeWindow ->
           withFontTexture $ \_aeFontTexture ->
           withFrameBuffer w h LowQualityDownscaling $ \_aeFB ->
-          withQuadRenderer 4096 $ \_aeQR -> do
+          withQuadRenderer 4096 $ \_aeQR ->
+          (withExperiment :: WithExperiment EmptyExperiment) $ \emptyExperiment -> do
             traceSystemInfo
             _asCurTick <- getTick
-            let as = AppState { _asLastEscPress   = -1
-                              , _asFrameTimes     = BS.empty 60 -- Average over last N FPS
-                              , _asFrameIdx       = 0
+            let _aeExperiments =
+                    [ AnyWithExperiment (withExperiment :: WithExperiment SomeExperiment1)
+                    , AnyWithExperiment (withExperiment :: WithExperiment SomeExperiment2)
+                    ]
+                ae = AppEnv { .. }
+                as = AppState { _asLastEscPress = -1
+                              , _asFrameTimes   = BS.empty 60 -- Average over last N FPS
+                              , _asFrameIdx     = 0
+                              , _asExperiment   = AnyExperiment emptyExperiment
                               , ..
                               }
-                ae = AppEnv { .. }
-             in runAppT as ae run
+             in run ae as
 

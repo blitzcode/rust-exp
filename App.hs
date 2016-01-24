@@ -38,11 +38,12 @@ import QuadRendering
 import qualified BoundedSequence as BS
 import Experiment
 
-data AppState = AppState { _asCurTick      :: !Double
-                         , _asLastEscPress :: !Double
-                         , _asFrameTimes   :: BS.BoundedSequence Double
-                         , _asFrameIdx     :: !Int
-                         , _asExperiment   :: AnyExperiment
+data AppState = AppState { _asCurTick        :: !Double
+                         , _asLastEscPress   :: !Double
+                         , _asFrameTimes     :: BS.BoundedSequence Double
+                         , _asFrameIdx       :: !Int
+                         , _asExperiment     :: AnyExperiment
+                         , _asExperimentDesc :: String
                          }
 
 data AppEnv = AppEnv { _aeWindow          :: GLFW.Window
@@ -61,6 +62,48 @@ data ExpResult = ExpNext | ExpPrev | ExpExit
                  deriving (Show, Eq, Enum)
 type AppT m = EitherT ExpResult (StateT AppState (ReaderT AppEnv m))
 type AppIO = AppT IO
+
+runExperimentState :: (forall e. Experiment e => e -> IO e) -> AppIO ()
+runExperimentState f = do
+    anyExp <- use asExperiment
+    case anyExp of
+        (AnyExperiment e) -> do
+            e' <- liftIO $ f e
+            asExperiment .= AnyExperiment e'
+
+runExperimentState2 :: (forall e. (Experiment e) => StateT e IO a) -> AppIO a
+runExperimentState2 f = do
+    anyExp <- use asExperiment
+    case anyExp of
+        (AnyExperiment e) -> do
+            (r, e') <- liftIO . flip runStateT e $ f
+            asExperiment .= AnyExperiment e'
+            return r
+
+runExperimentState3 :: (forall e m. (Experiment e, MonadIO m, MonadState e m) => m a) -> AppIO a
+runExperimentState3 f = do
+    anyExp <- use asExperiment
+    case anyExp of
+        (AnyExperiment e) -> do
+            (r, e') <- liftIO . flip runStateT e $ f
+            asExperiment .= AnyExperiment e'
+            return r
+
+-- TODO: Write this using Lens zoom
+--
+-- health :: Lens' Unit Int
+-- health = lens _health (\unit v -> unit { _health = v })
+--
+-- >>> flip State.evalState (a,b) $ zoom _1 $ use id
+-- a
+-- 
+-- >>> flip State.execState (a,b) $ zoom _1 $ id .= c
+-- (c,b)
+
+event = (GLFWEventError GLFW.Error'NotInitialized "")
+stuff = runExperimentState (experimentGLFWEvent event)
+
+stuff2 = runExperimentState3 $ experimentGLFWEventState event
 
 processAllEvents :: MonadIO m => TQueue a -> (a -> m ()) -> m ()
 processAllEvents tq processEvent =
@@ -140,14 +183,17 @@ draw = do
                               QuadUVDefault
             ftStr <- updateAndReturnFrameTimes
             (fbWdh, fbHgt) <- liftIO $ getFrameBufferDim _aeFB
+            expDesc <- use asExperimentDesc
             liftIO . drawTextWithShadow _aeFontTexture qb 3 (h - 12) $
-                printf "2x[ESC] Exit | [S]creenshot | %ix%i | %s\nExperiment %i of %i [-][=]: %s"
+                printf "2x[ESC] Exit | [S]creenshot | %ix%i | %s\nExp. [-][=] %s |"
                        fbWdh
                        fbHgt
                        ftStr
-                       (0 :: Int)
-                       (0 :: Int)
-                       "Name"
+                       expDesc
+  where drawTextWithShadow :: GL.TextureObject -> QuadRenderBuffer -> Int -> Int -> String -> IO ()
+        drawTextWithShadow tex qb x y str = do
+            drawText tex qb (x + 1) (y - 1) 0x00000000 str
+            drawText tex qb  x       y      0x0000FF00 str
 
 updateAndReturnFrameTimes :: MonadState AppState m => m String
 updateAndReturnFrameTimes = do
@@ -165,11 +211,6 @@ updateAndReturnFrameTimes = do
                         (fdMean  * 1000)
                         (1.0 / fdWorst)
                         (1.0 / fdBest)
-
-drawTextWithShadow :: GL.TextureObject -> QuadRenderBuffer -> Int -> Int -> String -> IO ()
-drawTextWithShadow tex qb x y str = do
-    drawText tex qb (x + 1) (y - 1) 0x00000000 str
-    drawText tex qb  x       y      0x0000FF00 str
 
 run :: AppEnv -> AppState -> IO ()
 run env st =
@@ -190,7 +231,7 @@ run env st =
                 curExp <- (!! expIdx) <$> view aeExperiments
                 control $ \runMonad ->
                     (\(AnyWithExperiment withExperiment') ->
-                        liftIO $ withExperiment' (runMonad . withExperimentInner)
+                        liftIO $ withExperiment' (runMonad . withExperimentInner expIdx)
                     ) curExp
             numExp <- length <$> view aeExperiments
             -- Exit or keep running with a different experiment?
@@ -203,10 +244,13 @@ run env st =
                                           | idx >= numExp = 0
                                           | otherwise     = idx
         -- Experiment setup complete, store state and enter main loop 
-        withExperimentInner :: Experiment e => e -> AppIO ()
-        withExperimentInner expState = do
-            liftIO . traceS TLInfo $ "Switching to experiment: " ++ (experimentName expState)
-            asExperiment .= AnyExperiment expState
+        withExperimentInner :: Experiment e => Int -> e -> AppIO ()
+        withExperimentInner expIdx expState = do
+            let name = experimentName expState
+            liftIO . traceS TLInfo $ "Switching to experiment: " ++ name
+            maxExp <- pred . length <$> view aeExperiments
+            asExperimentDesc .= printf "%i/%i: %s" expIdx maxExp name
+            asExperiment     .= AnyExperiment expState
             mainLoop
         -- Main loop
         mainLoop :: AppIO ()

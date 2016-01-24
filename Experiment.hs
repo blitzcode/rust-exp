@@ -1,5 +1,5 @@
 
-{-# LANGUAGE ExistentialQuantification, RankNTypes #-}
+{-# LANGUAGE ExistentialQuantification, RankNTypes, FlexibleContexts #-}
 
 module Experiment ( Experiment(..)
                   , AnyExperiment(..)
@@ -7,6 +7,10 @@ module Experiment ( Experiment(..)
                   , WithExperiment
                   , EmptyExperiment
                   ) where
+
+import Control.Monad.IO.Class
+import Control.Monad.State.Class
+import GLFWHelpers (GLFWEvent)
 
 -- Existential wrappers for creating / using arbitrary experiments
 type WithExperiment e  = forall a. Experiment e => (e -> IO a) -> IO a
@@ -19,7 +23,11 @@ class Experiment e where
     -- statusString :: (MonadState e m, MonadIO m) -> m String
     -- draw
     -- update
-    -- processGLFWEvent :: GLFWEvent -> m ()
+    experimentGLFWEvent :: (MonadIO m) => GLFWEvent -> e -> m e
+    experimentGLFWEvent _ e = return e
+
+    experimentGLFWEventState :: (MonadIO m, MonadState e m) => GLFWEvent -> m ()
+    experimentGLFWEventState _ = return ()
 
 --runExperimentState :: (MonadIO m, Experiment e, MonadState e ms, MonadIO ms) => e -> ms a -> m (e, a)
 --runExperimentState f = liftIO 

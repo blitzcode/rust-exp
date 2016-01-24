@@ -61,10 +61,11 @@ main = do
                     , AnyWithExperiment (withExperiment :: WithExperiment SomeExperiment2)
                     ]
                 ae = AppEnv { .. }
-                as = AppState { _asLastEscPress = -1
-                              , _asFrameTimes   = BS.empty 60 -- Average over last N FPS
-                              , _asFrameIdx     = 0
-                              , _asExperiment   = AnyExperiment emptyExperiment
+                as = AppState { _asLastEscPress   = -1
+                              , _asFrameTimes     = BS.empty 60 -- Average over last N FPS
+                              , _asFrameIdx       = 0
+                              , _asExperiment     = AnyExperiment emptyExperiment
+                              , _asExperimentDesc = ""
                               , ..
                               }
              in run ae as

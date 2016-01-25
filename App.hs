@@ -40,18 +40,18 @@ import Experiment
 
 data AppState = AppState { _asCurTick        :: !Double
                          , _asLastEscPress   :: !Double
-                         , _asFrameTimes     :: BS.BoundedSequence Double
+                         , _asFrameTimes     :: !(BS.BoundedSequence Double)
                          , _asFrameIdx       :: !Int
-                         , _asExperiment     :: AnyExperiment
-                         , _asExperimentDesc :: String
+                         , _asExperiment     :: !AnyExperiment
+                         , _asExperimentDesc :: !String
                          }
 
-data AppEnv = AppEnv { _aeWindow          :: GLFW.Window
-                     , _aeGLFWEventsQueue :: TQueue GLFWEvent
-                     , _aeFontTexture     :: GL.TextureObject
-                     , _aeFB              :: FrameBuffer
-                     , _aeQR              :: QuadRenderer
-                     , _aeExperiments     :: [AnyWithExperiment]
+data AppEnv = AppEnv { _aeWindow          :: !GLFW.Window
+                     , _aeGLFWEventsQueue :: !(TQueue GLFWEvent)
+                     , _aeFontTexture     :: !GL.TextureObject
+                     , _aeFB              :: !FrameBuffer
+                     , _aeQR              :: !QuadRenderer
+                     , _aeExperiments     :: ![AnyWithExperiment]
                      }
 
 makeLenses ''AppState
@@ -63,47 +63,16 @@ data ExpResult = ExpNext | ExpPrev | ExpExit
 type AppT m = EitherT ExpResult (StateT AppState (ReaderT AppEnv m))
 type AppIO = AppT IO
 
-runExperimentState :: (forall e. Experiment e => e -> IO e) -> AppIO ()
-runExperimentState f = do
-    anyExp <- use asExperiment
-    case anyExp of
-        (AnyExperiment e) -> do
-            e' <- liftIO $ f e
-            asExperiment .= AnyExperiment e'
-
-runExperimentState2 :: (forall e. (Experiment e) => StateT e IO a) -> AppIO a
-runExperimentState2 f = do
-    anyExp <- use asExperiment
-    case anyExp of
+-- Run a computation in the State monad with the current experiment as its state. Store the
+-- final state back into ours. Note that we can't write this with the 'zoom' combinator
+-- from lens as we can't define a lens for an existential type
+runExperimentState :: (forall e m. (Experiment e, MonadIO m, MonadState e m) => m a) -> AppIO a
+runExperimentState f =
+    use asExperiment >>= \case
         (AnyExperiment e) -> do
             (r, e') <- liftIO . flip runStateT e $ f
             asExperiment .= AnyExperiment e'
             return r
-
-runExperimentState3 :: (forall e m. (Experiment e, MonadIO m, MonadState e m) => m a) -> AppIO a
-runExperimentState3 f = do
-    anyExp <- use asExperiment
-    case anyExp of
-        (AnyExperiment e) -> do
-            (r, e') <- liftIO . flip runStateT e $ f
-            asExperiment .= AnyExperiment e'
-            return r
-
--- TODO: Write this using Lens zoom
---
--- health :: Lens' Unit Int
--- health = lens _health (\unit v -> unit { _health = v })
---
--- >>> flip State.evalState (a,b) $ zoom _1 $ use id
--- a
--- 
--- >>> flip State.execState (a,b) $ zoom _1 $ id .= c
--- (c,b)
-
-event = (GLFWEventError GLFW.Error'NotInitialized "")
-stuff = runExperimentState (experimentGLFWEvent event)
-
-stuff2 = runExperimentState3 $ experimentGLFWEventState event
 
 processAllEvents :: MonadIO m => TQueue a -> (a -> m ()) -> m ()
 processAllEvents tq processEvent =
@@ -136,7 +105,7 @@ processGLFWEvent ev =
                 GLFW.Key'Equal -> onRenderSettingsChage >> left ExpNext
                 _              -> return ()
         GLFWEventFramebufferSize _win _w _h -> resize
-        _ -> return ()
+        _ -> runExperimentState $ experimentGLFWEvent ev -- Pass on event to the experiment
 
 -- Handle changes in window and frame buffer size
 resize :: (MonadReader AppEnv m, MonadState AppState m, MonadIO m) => m ()
@@ -163,10 +132,8 @@ draw = do
         GL.clearColor GL.$= (GL.Color4 1 0 1 1 :: GL.Color4 GL.GLclampf)
         GL.clear [GL.ColorBuffer, GL.DepthBuffer]
         GL.depthFunc GL.$= Just GL.Lequal
-
-    void . fillFrameBuffer _aeFB $ \_w _h _fbVec ->
-        return ()
-
+    -- Allow the experiment to draw into the framebuffer
+    runExperimentState $ experimentDraw _aeFB _asCurTick
     -- Render everything quad based
     (liftIO $ GLFW.getFramebufferSize _aeWindow) >>= \(w, h) ->
         void . withQuadRenderBuffer _aeQR w h $ \qb -> do
@@ -184,12 +151,14 @@ draw = do
             ftStr <- updateAndReturnFrameTimes
             (fbWdh, fbHgt) <- liftIO $ getFrameBufferDim _aeFB
             expDesc <- use asExperimentDesc
+            expStatusString <- runExperimentState experimentStatusString
             liftIO . drawTextWithShadow _aeFontTexture qb 3 (h - 12) $
-                printf "2x[ESC] Exit | [S]creenshot | %ix%i | %s\nExp. [-][=] %s |"
+                printf "2x[ESC] Exit | [S]creenshot | %ix%i | %s\nExp. [-][=] %s | %s"
                        fbWdh
                        fbHgt
                        ftStr
                        expDesc
+                       expStatusString
   where drawTextWithShadow :: GL.TextureObject -> QuadRenderBuffer -> Int -> Int -> String -> IO ()
         drawTextWithShadow tex qb x y str = do
             drawText tex qb (x + 1) (y - 1) 0x00000000 str
@@ -273,12 +242,3 @@ run env st =
             -- Done?
             flip unless mainLoop =<< liftIO (GLFW.windowShouldClose window)
 
-            {-
-            exp11 <- use asExperiment
-            let exp11b :: forall e. Experiment e => e
-                exp11b = (\(AnyExperiment e) -> e) exp11
-            exp11 <- use asExperiment
-            let callWithExp :: AnyExperiment -> (forall e. Experiment e => e -> AppIO ()) -> AppIO ()
-                callWithExp (AnyExperiment e) f = f e
-             in callWithExp exp11 (liftIO . putStrLn . experimentName)
-            -}

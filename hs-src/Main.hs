@@ -57,7 +57,8 @@ main = do
             traceSystemInfo
             _asCurTick <- getTick
             let _aeExperiments =
-                    [ AnyWithExperiment (withExperiment :: WithExperiment SomeExperiment1)
+                    [ AnyWithExperiment (withExperiment :: WithExperiment RustSineExperiment)
+                    , AnyWithExperiment (withExperiment :: WithExperiment SomeExperiment1)
                     , AnyWithExperiment (withExperiment :: WithExperiment SomeExperiment2)
                     ]
                 ae = AppEnv { .. }

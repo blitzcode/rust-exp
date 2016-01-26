@@ -3,3 +3,4 @@ cabal.sandbox.config
 dist/
 rust-exp.prof
 .stack-work/
+target/

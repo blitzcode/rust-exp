@@ -13,6 +13,14 @@ A few low-resolution previews of pictures generated, visit the links above for m
 
 ![rust-exp](https://raw.github.com/blitzcode/rust-exp/master/img/rust-exp.png)
 
+# Building
+
+This project uses the Stack / Cabal tools (`stack build`) for building the Haskell code and Cargo (`cargo build --release`) for building the Rust code. There's a top-level Makefile invoking both, simply do
+
+    make
+
+once you have Stack and Cargo / Rust installed.
+
 # Legal
 
 This program is published under the [MIT License](http://en.wikipedia.org/wiki/MIT_License).

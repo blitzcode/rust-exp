@@ -33,8 +33,10 @@ pub extern fn gol_step() -> () {
     let grid_size = (GRID_WDH * GRID_WDH) as usize;
     let mut new_grid = Vec::with_capacity(grid_size);
     unsafe { new_grid.set_len(grid_size); }
+    let new_grid_ptr = new_grid.as_mut_ptr();
 
     let mut grid = GRID.lock().unwrap();
+    let grid_ptr = grid.as_mut_ptr();
 
     // Compute the four borders
     for side in 0..4 {
@@ -56,12 +58,12 @@ pub extern fn gol_step() -> () {
                 let wrapx = if x < 0 { GRID_WDH - 1 } else { if x > GRID_WDH - 1 { 0 } else { x } };
                 let wrapy = if y < 0 { GRID_WDH - 1 } else { if y > GRID_WDH - 1 { 0 } else { y } };
                 let idx = wrapx + wrapy * GRID_WDH;
-                grid[idx as usize]
+                unsafe { * grid_ptr.offset(idx as isize) }
             };
 
             // 2D indexing, faster to wrap
-            let idx = (x + y * GRID_WDH) as usize;
-            let alive = grid[idx];
+            let idx = (x + y * GRID_WDH) as isize;
+            let alive = unsafe { * grid_ptr.offset(idx as isize) };
             let alive_nb = torus_idx(x + 1, y    ) +
                            torus_idx(x    , y + 1) +
                            torus_idx(x - 1, y    ) +
@@ -71,7 +73,10 @@ pub extern fn gol_step() -> () {
                            torus_idx(x + 1, y - 1) +
                            torus_idx(x - 1, y + 1);
 
-            new_grid[idx] = if alive_nb == 3 || (alive == 1 && alive_nb == 2) { 1 } else { 0 };
+            unsafe {
+                * new_grid_ptr.offset(idx as isize) =
+                    if alive_nb == 3 || (alive == 1 && alive_nb == 2) { 1 } else { 0 };
+            }
 
             x += xincr;
             y += yincr;
@@ -83,18 +88,22 @@ pub extern fn gol_step() -> () {
         for x in 1..GRID_WDH - 1 {
             // 1D indexing, no wrapping needed
             let idx = x + y * GRID_WDH;
-            let alive = grid[idx as usize];
-            let alive_nb = grid[(idx + 1           ) as usize] +
-                           grid[(idx - 1           ) as usize] +
-                           grid[(idx     + GRID_WDH) as usize] +
-                           grid[(idx     - GRID_WDH) as usize] +
-                           grid[(idx + 1 + GRID_WDH) as usize] +
-                           grid[(idx + 1 - GRID_WDH) as usize] +
-                           grid[(idx - 1 + GRID_WDH) as usize] +
-                           grid[(idx - 1 - GRID_WDH) as usize];
+            let alive = unsafe { * grid_ptr.offset(idx as isize) };
+            let alive_nb = unsafe {
+                * grid_ptr.offset((idx + 1           ) as isize) +
+                * grid_ptr.offset((idx - 1           ) as isize) +
+                * grid_ptr.offset((idx     + GRID_WDH) as isize) +
+                * grid_ptr.offset((idx     - GRID_WDH) as isize) +
+                * grid_ptr.offset((idx + 1 + GRID_WDH) as isize) +
+                * grid_ptr.offset((idx + 1 - GRID_WDH) as isize) +
+                * grid_ptr.offset((idx - 1 + GRID_WDH) as isize) +
+                * grid_ptr.offset((idx - 1 - GRID_WDH) as isize)
+            };
 
-            new_grid[idx as usize] =
-                if alive_nb == 3 || (alive == 1 && alive_nb == 2) { 1 } else { 0 };
+            unsafe {
+                * new_grid_ptr.offset(idx as isize) =
+                    if alive_nb == 3 || (alive == 1 && alive_nb == 2) { 1 } else { 0 };
+            }
         }
     }
 

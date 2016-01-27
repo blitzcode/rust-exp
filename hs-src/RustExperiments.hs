@@ -1,50 +1,64 @@
 
-{-# LANGUAGE RecordWildCards, ForeignFunctionInterface #-}
+{-# LANGUAGE RecordWildCards, ForeignFunctionInterface, TemplateHaskell #-}
 
-module RustExperiments ( SomeExperiment1
-                       , SomeExperiment2
-                       , RustSineExperiment
+module RustExperiments ( RustSineExperiment
+                       , RustGoLExperiment
                        ) where
 
--- import Control.Concurrent.Async
-import Control.Concurrent.MVar
-import Control.Monad
 import Control.Monad.IO.Class
+import Control.Lens
 import Foreign.C.Types
 import Foreign.Ptr
 import Data.Word
+import Text.Printf
 import qualified Data.Vector.Storable.Mutable as VSM
 
 import Experiment
 import FrameBuffer
+import Timing
+import qualified BoundedSequence as BS
 
-data SomeExperiment1 = SomeExperiment1 { se1MVar    :: !(MVar String)
-                                       , se1SomeInt :: !Int
-                                       }
+--
+-- Simple 2D scrolling sine waves
+--
 
-instance Experiment SomeExperiment1 where
-    withExperiment f = do se1MVar <- newEmptyMVar
-                          f SomeExperiment1 { se1SomeInt = 0, .. }
-    experimentName _ = "SomeExperiment1"
+data RustSineExperiment = RustSineExperiment { _rseTime :: !(BS.BoundedSequence Double)
+                                             }
 
-data SomeExperiment2 = SomeExperiment2 { se2MVar    :: !(MVar String)
-                                       , se2SomeInt :: !Int
-                                       }
-
-instance Experiment SomeExperiment2 where
-    withExperiment f = do se2MVar <- newEmptyMVar
-                          f SomeExperiment2 { se2SomeInt = 0, .. }
-    experimentName _ = "SomeExperiment2"
-
-data RustSineExperiment = RustSineExperiment
+makeLenses ''RustSineExperiment
 
 instance Experiment RustSineExperiment where
-    withExperiment f = f RustSineExperiment
+    withExperiment f = f $ RustSineExperiment (BS.empty 30)
     experimentName _ = "RustSine"
-    experimentDraw fb tick =
-        liftIO . void . fillFrameBuffer fb $ \w h vec ->
+    experimentDraw fb tick = do
+        mbtime <- liftIO . fillFrameBuffer fb $ \w h vec ->
             VSM.unsafeWith vec $ \pvec ->
-                sineScroller (fromIntegral w) (fromIntegral h) pvec tick
+                fst <$> timeIt (sineScroller (fromIntegral w) (fromIntegral h) pvec tick)
+        case mbtime of
+            Just time -> rseTime %= BS.push_ time
+            Nothing   -> return ()
+    experimentStatusString = do
+        times <- use $ rseTime.to BS.toList
+        return . printf "%.2fms" . (* 1000) $ sum times / fromIntegral (length times)
 
 foreign import ccall "sine_scroller" sineScroller :: CInt -> CInt -> Ptr Word32 -> Double -> IO ()
+
+--
+-- Game of Life
+--
+
+data RustGoLExperiment = RustGoLExperiment {
+                                           }
+
+instance Experiment RustGoLExperiment where
+    withExperiment f = f $ RustGoLExperiment
+    experimentName _ = "RustGoL"
+    experimentDraw fb tick = do
+        {-
+        liftIO . fillFrameBuffer fb $ \w h vec ->
+            VSM.unsafeWith vec $ \pvec ->
+                return ()
+        -}
+        return ()
+    experimentStatusString = return ""
 

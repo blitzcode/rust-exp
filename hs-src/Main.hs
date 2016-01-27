@@ -58,8 +58,7 @@ main = do
             _asCurTick <- getTick
             let _aeExperiments =
                     [ AnyWithExperiment (withExperiment :: WithExperiment RustSineExperiment)
-                    , AnyWithExperiment (withExperiment :: WithExperiment SomeExperiment1)
-                    , AnyWithExperiment (withExperiment :: WithExperiment SomeExperiment2)
+                    , AnyWithExperiment (withExperiment :: WithExperiment RustGoLExperiment)
                     ]
                 ae = AppEnv { .. }
                 as = AppState { _asLastEscPress   = -1

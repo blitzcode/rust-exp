@@ -3,7 +3,8 @@
              , ForeignFunctionInterface
              , TemplateHaskell
              , BangPatterns
-             , LambdaCase #-}
+             , LambdaCase
+             , FlexibleContexts #-}
 
 module RustExperiments ( RustSineExperiment
                        , RustGoLExperiment
@@ -15,6 +16,7 @@ import Control.Monad
 import Control.Monad.State.Class
 import Control.Concurrent.MVar
 import Control.Concurrent.Async
+import Control.Exception
 import Foreign.C.Types
 import Foreign.Ptr
 import Data.Word
@@ -71,7 +73,7 @@ data RustGoLExperiment = RustGoLExperiment { -- Serialize main / worker thread a
                                            }
 
 instance Experiment RustGoLExperiment where
-    withExperiment f = do setPattern GP.ark
+    withExperiment f = do setPatternNoLock GP.ark
                           rgolLock  <- newMVar ()
                           rgolStats <- newMVar $ GoLStats 0 1
                           withAsync (golWorker rgolLock rgolStats) $ \_ ->
@@ -90,15 +92,14 @@ instance Experiment RustGoLExperiment where
                         (avgtime * 1000)
                         (round $ 1 / avgtime :: Int)
     experimentGLFWEvent ev = do
-        lock <- gets rgolLock
         case ev of
             GLFWEventKey _win k _sc ks _mk | ks == GLFW.KeyState'Pressed ->
                 case k of
-                    GLFW.Key'R -> liftIO . withMVar lock $ \_ -> golRandomize
-                    GLFW.Key'G -> liftIO . withMVar lock $ \_ -> setPattern GP.gun
-                    GLFW.Key'A -> liftIO . withMVar lock $ \_ -> setPattern GP.acorn
-                    GLFW.Key'F -> liftIO . withMVar lock $ \_ -> setPattern GP.spacefill
-                    GLFW.Key'K -> liftIO . withMVar lock $ \_ -> setPattern GP.ark
+                    GLFW.Key'R -> randomizePattern
+                    GLFW.Key'G -> setPattern GP.gun
+                    GLFW.Key'A -> setPattern GP.acorn
+                    GLFW.Key'F -> setPattern GP.spacefill
+                    GLFW.Key'K -> setPattern GP.ark
                     _          -> return ()
             _ -> return ()
 
@@ -117,23 +118,31 @@ golWorker lock stats = go (BS.empty 30) (0 :: Int)
                          )
               go bs' (ngen + 1)
 
--- Get a grid vector for an ASCII drawing of a GoL pattern
-vecFromASCII :: [String] -> (Int, Int, VS.Vector Word8)
-vecFromASCII asciiPat = (w, h, v)
-  where w = case asciiPat of
+setPattern :: (MonadState RustGoLExperiment m, MonadIO m) => [String] -> m ()
+setPattern asciiPat =
+    gets rgolLock >>= \lock ->
+        liftIO . withMVar lock $ \_ ->
+            setPatternNoLock asciiPat
+
+-- Set the grid from an ASCII drawing of a GoL pattern
+setPatternNoLock :: [String] -> IO ()
+setPatternNoLock asciiPat =
+    let w = case asciiPat of
                 (x:_) -> length x
                 _     -> 0
         h = length asciiPat
         v = VS.fromList $ concatMap (map (\case { 'O' -> 1; _ -> 0 })) asciiPat
-
-setPattern :: [String] -> IO ()
-setPattern asciiPat =
-    let (w, h, v) = vecFromASCII asciiPat
-    in  VS.unsafeWith v $ \pvec ->
+    in  (VS.length v == w * h) `assert` VS.unsafeWith v $ \pvec ->
             golSetPattern (fromIntegral w) (fromIntegral h) pvec
 
-foreign import ccall "gol_draw" golDraw :: CInt -> CInt -> Ptr Word32 -> IO ()
-foreign import ccall "gol_step" golStep :: IO ()
-foreign import ccall "gol_randomize" golRandomize :: IO ()
+randomizePattern :: (MonadState RustGoLExperiment m, MonadIO m) => m ()
+randomizePattern =
+    gets rgolLock >>= \lock ->
+        liftIO . withMVar lock $ \_ ->
+            golRandomize
+
+foreign import ccall "gol_draw"        golDraw       :: CInt -> CInt -> Ptr Word32 -> IO ()
+foreign import ccall "gol_step"        golStep       :: IO ()
+foreign import ccall "gol_randomize"   golRandomize  :: IO ()
 foreign import ccall "gol_set_pattern" golSetPattern :: CInt -> CInt -> Ptr Word8 -> IO ()
 

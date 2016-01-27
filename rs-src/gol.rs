@@ -29,11 +29,13 @@ pub extern fn gol_randomize() -> () {
 
 #[no_mangle]
 pub extern fn gol_step() -> () {
-    let mut grid = GRID.lock().unwrap();
 
+    // Allocate new grid without wasting time setting it to any value
     let grid_size = (GRID_WDH * GRID_WDH) as usize;
     let mut new_grid = Vec::with_capacity(grid_size);
     unsafe { new_grid.set_len(grid_size); }
+
+    let mut grid = GRID.lock().unwrap();
 
     for y in 0..GRID_WDH {
         for x in 0..GRID_WDH {
@@ -59,21 +61,32 @@ pub extern fn gol_step() -> () {
         }
     }
 
-    *grid = new_grid;
+    * grid = new_grid;
 }
 
 #[no_mangle]
 pub extern fn gol_draw(w: i32, h: i32, fb: *mut u32) -> () {
+
+    // Clear background
     unsafe { ptr::write_bytes(fb, 64, (w * h) as usize); }
 
     let grid = GRID.lock().unwrap();
 
+    // Center
+    let xoffs = w / 2 - GRID_WDH / 2;
+    let yoffs = h / 2 - GRID_WDH / 2;
+
     for y in 0..GRID_WDH {
         for x in 0..GRID_WDH {
+            let idx_fb = (xoffs + x) + (yoffs + y) * w;
+
+            // Out of bounds check for the FB
+            if idx_fb < 0 || idx_fb > w * h - 1 { continue; }
+
             let idx_grid = x + y * GRID_WDH;
-            let idx_fb = x + y * w;
+
             unsafe {
-                *fb.offset(idx_fb as isize) =
+                * fb.offset(idx_fb as isize) =
                     if grid[idx_grid as usize] == 1 { 0x00FFFFFF } else { 0 };
             }
         }

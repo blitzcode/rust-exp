@@ -1,5 +1,9 @@
 
-{-# LANGUAGE RecordWildCards, ForeignFunctionInterface, TemplateHaskell, BangPatterns #-}
+{-# LANGUAGE   RecordWildCards
+             , ForeignFunctionInterface
+             , TemplateHaskell
+             , BangPatterns
+             , LambdaCase #-}
 
 module RustExperiments ( RustSineExperiment
                        , RustGoLExperiment
@@ -17,12 +21,16 @@ import Data.Word
 import Data.Maybe
 import Text.Printf
 import qualified Data.Vector.Storable.Mutable as VSM
+import qualified Data.Vector.Storable as VS
+import qualified Graphics.UI.GLFW as GLFW
 
 import Experiment
 import FrameBuffer
 import Timing
 import qualified BoundedSequence as BS
 import Median
+import qualified GoLPatterns as GP
+import GLFWHelpers
 
 --
 -- Simple 2D scrolling sine waves
@@ -63,7 +71,7 @@ data RustGoLExperiment = RustGoLExperiment { -- Serialize main / worker thread a
                                            }
 
 instance Experiment RustGoLExperiment where
-    withExperiment f = do golRandomize
+    withExperiment f = do setPattern GP.ark
                           rgolLock  <- newMVar ()
                           rgolStats <- newMVar $ GoLStats 0 1
                           withAsync (golWorker rgolLock rgolStats) $ \_ ->
@@ -77,10 +85,22 @@ instance Experiment RustGoLExperiment where
                         golDraw (fromIntegral w) (fromIntegral h) pvec
     experimentStatusString = do
         GoLStats ngen avgtime <- liftIO . readMVar =<< gets rgolStats
-        return $ printf "256^2 Grid, %i Gens, %.2fms, %iGPS"
+        return $ printf "256^2 Grid, %iGs, %.2fms, %iGPS | [RGAFK] Pattern"
                         ngen
                         (avgtime * 1000)
                         (round $ 1 / avgtime :: Int)
+    experimentGLFWEvent ev = do
+        lock <- gets rgolLock
+        case ev of
+            GLFWEventKey _win k _sc ks _mk | ks == GLFW.KeyState'Pressed ->
+                case k of
+                    GLFW.Key'R -> liftIO . withMVar lock $ \_ -> golRandomize
+                    GLFW.Key'G -> liftIO . withMVar lock $ \_ -> setPattern GP.gun
+                    GLFW.Key'A -> liftIO . withMVar lock $ \_ -> setPattern GP.acorn
+                    GLFW.Key'F -> liftIO . withMVar lock $ \_ -> setPattern GP.spacefill
+                    GLFW.Key'K -> liftIO . withMVar lock $ \_ -> setPattern GP.ark
+                    _          -> return ()
+            _ -> return ()
 
 -- Worker thread does computation, gets stalled when we draw / modify the grid
 golWorker :: MVar () -> MVar GoLStats -> IO ()
@@ -97,7 +117,23 @@ golWorker lock stats = go (BS.empty 30) (0 :: Int)
                          )
               go bs' (ngen + 1)
 
+-- Get a grid vector for an ASCII drawing of a GoL pattern
+vecFromASCII :: [String] -> (Int, Int, VS.Vector Word8)
+vecFromASCII asciiPat = (w, h, v)
+  where w = case asciiPat of
+                (x:_) -> length x
+                _     -> 0
+        h = length asciiPat
+        v = VS.fromList $ concatMap (map (\case { 'O' -> 1; _ -> 0 })) asciiPat
+
+setPattern :: [String] -> IO ()
+setPattern asciiPat =
+    let (w, h, v) = vecFromASCII asciiPat
+    in  VS.unsafeWith v $ \pvec ->
+            golSetPattern (fromIntegral w) (fromIntegral h) pvec
+
 foreign import ccall "gol_draw" golDraw :: CInt -> CInt -> Ptr Word32 -> IO ()
 foreign import ccall "gol_step" golStep :: IO ()
 foreign import ccall "gol_randomize" golRandomize :: IO ()
+foreign import ccall "gol_set_pattern" golSetPattern :: CInt -> CInt -> Ptr Word8 -> IO ()
 

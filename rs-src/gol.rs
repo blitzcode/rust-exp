@@ -93,3 +93,30 @@ pub extern fn gol_draw(w: i32, h: i32, fb: *mut u32) -> () {
     }
 }
 
+#[no_mangle]
+pub extern fn gol_set_pattern(w: i32, h: i32, pat: *mut u8) -> () {
+
+    let mut grid = GRID.lock().unwrap();
+
+    // Clear grid
+    let grid_size = GRID_WDH * GRID_WDH;
+    grid.clear();
+    grid.resize(grid_size as usize, 0);
+
+    // Center
+    let xoffs = GRID_WDH / 2 - w / 2;
+    let yoffs = GRID_WDH / 2 - h / 2;
+
+    for y in 0..h {
+        for x in 0..w {
+            let idx_grid = (xoffs + x) + (yoffs + y) * GRID_WDH;
+
+            // Out of bounds check for the grid
+            if idx_grid < 0 || idx_grid > grid_size - 1 { continue; }
+
+            let idx_pat = x + y * w;
+            unsafe { grid[idx_grid as usize] = * pat.offset(idx_pat as isize); }
+        }
+    }
+}
+

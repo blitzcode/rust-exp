@@ -83,7 +83,7 @@ processAllEvents tq processEvent =
         _      -> return ()
 
 processGLFWEvent :: GLFWEvent -> AppIO ()
-processGLFWEvent ev =
+processGLFWEvent ev = do
     case ev of
         GLFWEventError e s -> do
            window <- view aeWindow
@@ -107,7 +107,8 @@ processGLFWEvent ev =
                 GLFW.Key'Equal -> onRenderSettingsChage >> left ExpNext
                 _              -> return ()
         GLFWEventFramebufferSize _win _w _h -> resize
-        _ -> runExperimentState $ experimentGLFWEvent ev -- Pass on event to the experiment
+        _ -> return ()
+    runExperimentState $ experimentGLFWEvent ev -- Pass on event to the experiment
 
 -- Handle changes in window and frame buffer size
 resize :: (MonadReader AppEnv m, MonadState AppState m, MonadIO m) => m ()

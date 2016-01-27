@@ -1,5 +1,5 @@
 
-{-# LANGUAGE RecordWildCards, ForeignFunctionInterface, TemplateHaskell #-}
+{-# LANGUAGE RecordWildCards, ForeignFunctionInterface, TemplateHaskell, BangPatterns #-}
 
 module RustExperiments ( RustSineExperiment
                        , RustGoLExperiment
@@ -8,6 +8,9 @@ module RustExperiments ( RustSineExperiment
 import Control.Monad.IO.Class
 import Control.Lens
 import Control.Monad
+import Control.Monad.State.Class
+import Control.Concurrent.MVar
+import Control.Concurrent.Async
 import Foreign.C.Types
 import Foreign.Ptr
 import Data.Word
@@ -18,6 +21,10 @@ import Experiment
 import FrameBuffer
 import Timing
 import qualified BoundedSequence as BS
+
+bsAvgerage :: Fractional a => BS.BoundedSequence a -> a
+bsAvgerage bs = sum xs / fromIntegral (length xs)
+    where xs = BS.toList bs
 
 --
 -- Simple 2D scrolling sine waves
@@ -39,8 +46,8 @@ instance Experiment RustSineExperiment where
             Just time -> rseTime %= BS.push_ time
             Nothing   -> return ()
     experimentStatusString = do
-        times <- use $ rseTime.to BS.toList
-        return . printf "%.2fms" . (* 1000) $ sum times / fromIntegral (length times)
+        times <- use rseTime
+        return . printf "%.2fms" . (* 1000) $ bsAvgerage times
 
 foreign import ccall "sine_scroller" sineScroller :: CInt -> CInt -> Ptr Word32 -> Double -> IO ()
 
@@ -48,19 +55,43 @@ foreign import ccall "sine_scroller" sineScroller :: CInt -> CInt -> Ptr Word32 
 -- Game of Life
 --
 
-data RustGoLExperiment = RustGoLExperiment {
+data GoLStats =  GoLStats !Int !Double
+                 deriving (Show, Eq)
+
+data RustGoLExperiment = RustGoLExperiment { -- Serialize main / worker thread access to Rust code
+                                             rgolLock :: MVar ()
+                                             -- Statistics from the worker thread
+                                           , rgolStats :: MVar GoLStats
                                            }
 
 instance Experiment RustGoLExperiment where
     withExperiment f = do golRandomize
-                          f $ RustGoLExperiment
+                          rgolLock <- newMVar ()
+                          rgolStats <- newMVar $ GoLStats 0 1
+                          withAsync (golWorker rgolLock rgolStats) $ \_ ->
+                              f $ RustGoLExperiment { .. }
     experimentName _ = "RustGoL"
-    experimentDraw fb _tick = do
-        liftIO $ golStep
-        liftIO . void . fillFrameBuffer fb $ \w h vec ->
-            VSM.unsafeWith vec $ \pvec ->
-                golDraw (fromIntegral w) (fromIntegral h) pvec
-    experimentStatusString = return ""
+    experimentDraw fb _tick =
+        gets rgolLock >>= \lock ->
+            liftIO . void $ withMVar lock $ \_ ->
+                fillFrameBuffer fb $ \w h vec ->
+                    VSM.unsafeWith vec $ \pvec ->
+                        golDraw (fromIntegral w) (fromIntegral h) pvec
+    experimentStatusString = do
+        GoLStats ngen avgtime <- liftIO . readMVar =<< gets rgolStats
+        return $ printf "%i Gens, %.2fms, %iGPS" ngen (avgtime * 1000) (round $ 1 / avgtime :: Int)
+
+-- Worker thread does computation, gets stalled when we draw / modify the grid
+golWorker :: MVar () -> MVar GoLStats -> IO ()
+golWorker lock stats = go (BS.empty 25) (0 :: Int)
+    where go !bs !ngen = do
+              -- Timed GoL step
+              time <- withMVar lock $ \_ ->
+                  fst <$> timeIt golStep
+              -- Update stats and keep going
+              let bs' = BS.push_ time bs
+              modifyMVar stats $ \_ -> return ( GoLStats ngen (bsAvgerage bs'), ())
+              go bs' (ngen + 1)
 
 foreign import ccall "gol_draw" golDraw :: CInt -> CInt -> Ptr Word32 -> IO ()
 foreign import ccall "gol_step" golStep :: IO ()

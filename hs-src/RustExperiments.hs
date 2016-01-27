@@ -77,11 +77,14 @@ instance Experiment RustGoLExperiment where
                         golDraw (fromIntegral w) (fromIntegral h) pvec
     experimentStatusString = do
         GoLStats ngen avgtime <- liftIO . readMVar =<< gets rgolStats
-        return $ printf "%i Gens, %.2fms, %iGPS" ngen (avgtime * 1000) (round $ 1 / avgtime :: Int)
+        return $ printf "256^2 Grid, %i Gens, %.2fms, %iGPS"
+                        ngen
+                        (avgtime * 1000)
+                        (round $ 1 / avgtime :: Int)
 
 -- Worker thread does computation, gets stalled when we draw / modify the grid
 golWorker :: MVar () -> MVar GoLStats -> IO ()
-golWorker lock stats = go (BS.empty 25) (0 :: Int)
+golWorker lock stats = go (BS.empty 30) (0 :: Int)
     where go !bs !ngen = do
               -- Timed GoL step
               time <- withMVar lock $ \_ ->
@@ -89,7 +92,9 @@ golWorker lock stats = go (BS.empty 25) (0 :: Int)
               -- Update stats and keep going
               let bs' = BS.push_ time bs
               modifyMVar stats $ \_ ->
-                  return ( GoLStats ngen (fromMaybe 1 . median . BS.toList $ bs'), ())
+                  return ( GoLStats ngen (fromMaybe 1 . median . BS.toList $ bs')
+                         , ()
+                         )
               go bs' (ngen + 1)
 
 foreign import ccall "gol_draw" golDraw :: CInt -> CInt -> Ptr Word32 -> IO ()

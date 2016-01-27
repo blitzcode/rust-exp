@@ -220,7 +220,7 @@ run env st =
             let name = experimentName expState
             liftIO . traceS TLInfo $ "Switching to experiment: " ++ name
             maxExp <- pred . length <$> view aeExperiments
-            asExperimentDesc .= printf "%i/%i: %s" expIdx maxExp name
+            asExperimentDesc .= printf "%i/%i: %s" (expIdx + 1) (maxExp + 1) name
             asExperiment     .= AnyExperiment expState
             mainLoop
         -- Main loop

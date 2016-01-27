@@ -1,9 +1,9 @@
 
 # Rust Experiments
 
-Description
+This project contains a number of experiments in the simulation / graphics category. I frequently write Haskell projects where I write the performance critical, numerical code in C/C++ or offload it to the GPU. I wanted to try using Rust as a safer and more functional alternative. Here we have a Haskell OpenGL application doing the display, user interaction, benchmarking and non-inner-loop parts with the actual computations done in a Rust library.
 
-**If you want to read actual algorithm descriptions and references of this project and see more, higher quality images visit the following links to my website**
+**If you want to read actual algorithm descriptions and references of these experiments and see more, higher quality images visit the following links to my website**
 
 - [Blitzcode.net](http://www.blitzcode.net/)
 

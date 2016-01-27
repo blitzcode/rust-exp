@@ -3,6 +3,7 @@ use std::sync::Mutex;
 use rand;
 use rand::Rng;
 use std::ptr;
+use std::thread;
 
 static GRID_WDH : i32 = 256;
 
@@ -82,6 +83,55 @@ pub extern fn gol_step() -> () {
             y += yincr;
         }
     }
+
+    /*
+    let nthreads = 2;
+    let threads: Vec<_> = (0..nthreads).map(|i| {
+        let range = (GRID_WDH - 2) / nthreads;
+        let seg_low = 1 + range * i;
+        let seg_high = if i == nthreads - 1 { GRID_WDH - 1 } else { 1 + range * (i + 1) };
+
+        // Allow sharing of pointers with our threads
+        struct SendPtr {
+            ptr : *mut u8
+        }
+        unsafe impl Send for SendPtr { }
+        let grid_ptr_send     = SendPtr { ptr: grid_ptr     };
+        let new_grid_ptr_send = SendPtr { ptr: new_grid_ptr };
+
+        thread::spawn(move || {
+            let grid_ptr     = grid_ptr_send.ptr;
+            let new_grid_ptr = new_grid_ptr_send.ptr;
+            // Compute interior
+            for y in seg_low..seg_high {
+                for x in 1..GRID_WDH - 1 {
+                    // 1D indexing, no wrapping needed
+                    let idx = x + y * GRID_WDH;
+                    let alive = unsafe { * grid_ptr.offset(idx as isize) };
+                    let alive_nb = unsafe {
+                        * grid_ptr.offset((idx + 1           ) as isize) +
+                        * grid_ptr.offset((idx - 1           ) as isize) +
+                        * grid_ptr.offset((idx     + GRID_WDH) as isize) +
+                        * grid_ptr.offset((idx     - GRID_WDH) as isize) +
+                        * grid_ptr.offset((idx + 1 + GRID_WDH) as isize) +
+                        * grid_ptr.offset((idx + 1 - GRID_WDH) as isize) +
+                        * grid_ptr.offset((idx - 1 + GRID_WDH) as isize) +
+                        * grid_ptr.offset((idx - 1 - GRID_WDH) as isize)
+                    };
+
+                    unsafe {
+                        * new_grid_ptr.offset(idx as isize) =
+                            if alive_nb == 3 || (alive == 1 && alive_nb == 2) { 1 } else { 0 };
+                    }
+                }
+            }
+        })
+    }).collect();
+
+    for thread in threads {
+        thread.join().unwrap();
+    }
+    */
 
     // Compute interior
     for y in 1..GRID_WDH - 1 {

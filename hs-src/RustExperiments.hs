@@ -7,6 +7,7 @@ module RustExperiments ( RustSineExperiment
 
 import Control.Monad.IO.Class
 import Control.Lens
+import Control.Monad
 import Foreign.C.Types
 import Foreign.Ptr
 import Data.Word
@@ -51,14 +52,17 @@ data RustGoLExperiment = RustGoLExperiment {
                                            }
 
 instance Experiment RustGoLExperiment where
-    withExperiment f = f $ RustGoLExperiment
+    withExperiment f = do golRandomize
+                          f $ RustGoLExperiment
     experimentName _ = "RustGoL"
-    experimentDraw fb tick = do
-        {-
-        liftIO . fillFrameBuffer fb $ \w h vec ->
+    experimentDraw fb _tick = do
+        liftIO $ golStep
+        liftIO . void . fillFrameBuffer fb $ \w h vec ->
             VSM.unsafeWith vec $ \pvec ->
-                return ()
-        -}
-        return ()
+                golDraw (fromIntegral w) (fromIntegral h) pvec
     experimentStatusString = return ""
+
+foreign import ccall "gol_draw" golDraw :: CInt -> CInt -> Ptr Word32 -> IO ()
+foreign import ccall "gol_step" golStep :: IO ()
+foreign import ccall "gol_randomize" golRandomize :: IO ()
 

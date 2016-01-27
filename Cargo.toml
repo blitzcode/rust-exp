@@ -7,3 +7,5 @@ path = "rs-src/lib.rs"
 crate-type = ["dylib"]
 
 [dependencies]
+lazy_static = "0.1.*"
+rand = "0.3"

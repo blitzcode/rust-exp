@@ -27,6 +27,7 @@ import qualified Graphics.Rendering.OpenGL as GL
 import qualified Graphics.UI.GLFW as GLFW
 import Text.Printf
 import Data.Time
+import Data.Maybe
 
 import GLFWHelpers
 import GLHelpers
@@ -37,6 +38,7 @@ import FrameBuffer
 import QuadRendering
 import qualified BoundedSequence as BS
 import Experiment
+import Median
 
 data AppState = AppState { _asCurTick        :: !Double
                          , _asLastEscPress   :: !Double
@@ -172,12 +174,12 @@ updateAndReturnFrameTimes = do
     let frameDeltas      = case frameTimes of (x:xs) -> goFD x xs; _ -> []
         goFD prev (x:xs) = (prev - x) : goFD x xs
         goFD _ []        = []
-        fdMean           = sum frameDeltas / (fromIntegral $ length frameDeltas)
+        fdMedian         = fromMaybe 1 $ median frameDeltas
         fdWorst          = case frameDeltas of [] -> 0; xs -> maximum xs
         fdBest           = case frameDeltas of [] -> 0; xs -> minimum xs
      in return $ printf "%.2fFPS/%.1fms (L: %.2f, H: %.2f)"
-                        (1.0 / fdMean)
-                        (fdMean  * 1000)
+                        (1.0 / fdMedian)
+                        (fdMedian  * 1000)
                         (1.0 / fdWorst)
                         (1.0 / fdBest)
 

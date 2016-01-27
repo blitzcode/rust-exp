@@ -14,6 +14,7 @@ import Control.Concurrent.Async
 import Foreign.C.Types
 import Foreign.Ptr
 import Data.Word
+import Data.Maybe
 import Text.Printf
 import qualified Data.Vector.Storable.Mutable as VSM
 
@@ -21,10 +22,7 @@ import Experiment
 import FrameBuffer
 import Timing
 import qualified BoundedSequence as BS
-
-bsAvgerage :: Fractional a => BS.BoundedSequence a -> a
-bsAvgerage bs = sum xs / fromIntegral (length xs)
-    where xs = BS.toList bs
+import Median
 
 --
 -- Simple 2D scrolling sine waves
@@ -46,8 +44,8 @@ instance Experiment RustSineExperiment where
             Just time -> rseTime %= BS.push_ time
             Nothing   -> return ()
     experimentStatusString = do
-        times <- use rseTime
-        return . printf "%.2fms" . (* 1000) $ bsAvgerage times
+        times <- use $ rseTime.to BS.toList
+        return . printf "%.2fms" . (* 1000) . fromMaybe 1 $ median times
 
 foreign import ccall "sine_scroller" sineScroller :: CInt -> CInt -> Ptr Word32 -> Double -> IO ()
 
@@ -66,7 +64,7 @@ data RustGoLExperiment = RustGoLExperiment { -- Serialize main / worker thread a
 
 instance Experiment RustGoLExperiment where
     withExperiment f = do golRandomize
-                          rgolLock <- newMVar ()
+                          rgolLock  <- newMVar ()
                           rgolStats <- newMVar $ GoLStats 0 1
                           withAsync (golWorker rgolLock rgolStats) $ \_ ->
                               f $ RustGoLExperiment { .. }
@@ -90,7 +88,8 @@ golWorker lock stats = go (BS.empty 25) (0 :: Int)
                   fst <$> timeIt golStep
               -- Update stats and keep going
               let bs' = BS.push_ time bs
-              modifyMVar stats $ \_ -> return ( GoLStats ngen (bsAvgerage bs'), ())
+              modifyMVar stats $ \_ ->
+                  return ( GoLStats ngen (fromMaybe 1 . median . BS.toList $ bs'), ())
               go bs' (ngen + 1)
 
 foreign import ccall "gol_draw" golDraw :: CInt -> CInt -> Ptr Word32 -> IO ()

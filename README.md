@@ -1,17 +1,20 @@
 
 # Rust Experiments
 
-This project contains a number of experiments in the simulation / graphics category. I frequently write Haskell projects where I write the performance critical, numerical code in C/C++ or offload it to the GPU. I wanted to try using Rust as a safer and more functional alternative. Here we have a Haskell OpenGL application doing the display, user interaction, benchmarking and non-inner-loop parts with the actual computations done in a Rust library.
+This project contains a number of experiments in the simulation / graphics category. I frequently write Haskell projects where I delegate the performance critical, numerical code to C/C++ or offload it to the GPU. I wanted to try using Rust for the performance critical parts as a safer and more functional alternative. Here we have a Haskell OpenGL application doing the display, user interaction, benchmarking and non-inner-loop parts with the actual computations done in a Rust library.
 
-**If you want to read actual algorithm descriptions and references of these experiments and see more, higher quality images visit the following links to my website**
+![rust-exp](https://raw.github.com/blitzcode/rust-exp/master/experiments.png)
 
-- [Blitzcode.net](http://www.blitzcode.net/)
+Experiments include...
 
-# Images
+- Simple 'scrolling sine waves' visualizer, proof-of-concept of the Rust -> Haskell -> OpenGL pipeline
+- The famous 'Game of Life' cellular automata, with a reasonably optimized and parallelized implementation and recallable patterns
 
-A few low-resolution previews of pictures generated, visit the links above for more, higher quality images.
+**If you want to read actual algorithm descriptions and references for these experiments, including more, higher quality images visit the following link to my website**
 
-![rust-exp](https://raw.github.com/blitzcode/rust-exp/master/img/rust-exp.png)
+[Rust projects on Blitzcode.net](http://www.blitzcode.net/rust.shtml)
+
+The Haskell application itself might also be of interests. It features a pluggable experiment framework, modern OpenGL 3/4.x style rendering, fonts, quad rendering, screenshots, framebuffer system, FPS counter, benchmarking, GLSL, logging etc. A good starting point for your own Haskell + OpenGL adventures.
 
 # Building
 

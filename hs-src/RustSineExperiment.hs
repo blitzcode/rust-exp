@@ -23,8 +23,7 @@ import Median
 
 -- Simple 2D scrolling sine waves
 
-data RustSineExperiment = RustSineExperiment { _rseTime :: !(BS.BoundedSequence Double)
-                                             }
+data RustSineExperiment = RustSineExperiment { _rseTime :: !(BS.BoundedSequence Double) }
 
 makeLenses ''RustSineExperiment
 

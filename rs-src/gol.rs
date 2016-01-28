@@ -29,7 +29,7 @@ pub extern fn gol_randomize() -> () {
 }
 
 #[no_mangle]
-pub extern fn gol_step() -> () {
+pub extern fn gol_step(num_workers : i32) -> () {
     // Allocate new grid without wasting time setting it to any value
     let grid_size = (GRID_WDH * GRID_WDH) as usize;
     let mut new_grid = Vec::with_capacity(grid_size);

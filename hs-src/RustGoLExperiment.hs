@@ -1,17 +1,14 @@
 
 {-# LANGUAGE   RecordWildCards
              , ForeignFunctionInterface
-             , TemplateHaskell
              , BangPatterns
              , LambdaCase
              , FlexibleContexts #-}
 
-module RustExperiments ( RustSineExperiment
-                       , RustGoLExperiment
-                       ) where
+module RustGoLExperiment ( RustGoLExperiment
+                         ) where
 
 import Control.Monad.IO.Class
-import Control.Lens
 import Control.Monad
 import Control.Monad.State.Class
 import Control.Concurrent.MVar
@@ -33,35 +30,6 @@ import qualified BoundedSequence as BS
 import Median
 import qualified GoLPatterns as GP
 import GLFWHelpers
-
---
--- Simple 2D scrolling sine waves
---
-
-data RustSineExperiment = RustSineExperiment { _rseTime :: !(BS.BoundedSequence Double)
-                                             }
-
-makeLenses ''RustSineExperiment
-
-instance Experiment RustSineExperiment where
-    withExperiment f = f $ RustSineExperiment (BS.empty 30)
-    experimentName _ = "RustSine"
-    experimentDraw fb tick = do
-        mbtime <- liftIO . fillFrameBuffer fb $ \w h vec ->
-            VSM.unsafeWith vec $ \pvec ->
-                fst <$> timeIt (sineScroller (fromIntegral w) (fromIntegral h) pvec tick)
-        case mbtime of
-            Just time -> rseTime %= BS.push_ time
-            Nothing   -> return ()
-    experimentStatusString = do
-        times <- use $ rseTime.to BS.toList
-        return . printf "%.2fms" . (* 1000) . fromMaybe 1 $ median times
-
-foreign import ccall "sine_scroller" sineScroller :: CInt -> CInt -> Ptr Word32 -> Double -> IO ()
-
---
--- Game of Life
---
 
 data GoLStats =  GoLStats !Int !Double
                  deriving (Show, Eq)
@@ -145,4 +113,5 @@ foreign import ccall "gol_draw"        golDraw       :: CInt -> CInt -> Ptr Word
 foreign import ccall "gol_step"        golStep       :: IO ()
 foreign import ccall "gol_randomize"   golRandomize  :: IO ()
 foreign import ccall "gol_set_pattern" golSetPattern :: CInt -> CInt -> Ptr Word8 -> IO ()
+
 

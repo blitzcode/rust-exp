@@ -1,7 +1,6 @@
 
 {-# LANGUAGE   TemplateHaskell
              , LambdaCase
-             , FlexibleContexts
              , RankNTypes #-}
 
 module AppDefs where

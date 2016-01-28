@@ -19,7 +19,8 @@ import FrameBuffer
 import QuadRendering
 import qualified BoundedSequence as BS
 import Experiment
-import RustExperiments
+import RustSineExperiment
+import RustGoLExperiment
 
 runOnAllCores :: IO ()
 runOnAllCores = GHC.Conc.getNumProcessors >>= setNumCapabilities
@@ -46,7 +47,7 @@ main :: IO ()
 main = do
     runOnAllCores
     withTrace Nothing True False True TLInfo $ do
-      _aeGLFWEventsQueue <- newTQueueIO :: IO (TQueue GLFWEvent)
+      _aeGLFWEventsQueue <- newTQueueIO
       let w = 512
           h = 512
        in withWindow w h "Viewer" _aeGLFWEventsQueue $ \_aeWindow ->
@@ -58,7 +59,7 @@ main = do
             _asCurTick <- getTick
             let _aeExperiments =
                     [ AnyWithExperiment (withExperiment :: WithExperiment RustSineExperiment)
-                    , AnyWithExperiment (withExperiment :: WithExperiment RustGoLExperiment)
+                    , AnyWithExperiment (withExperiment :: WithExperiment RustGoLExperiment )
                     ]
                 ae = AppEnv { .. }
                 as = AppState { _asLastEscPress   = -1

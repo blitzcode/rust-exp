@@ -6,4 +6,5 @@ extern crate rand;
 
 pub mod sine_scroller;
 pub mod gol;
+pub mod nbody;
 

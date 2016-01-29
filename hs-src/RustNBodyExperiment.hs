@@ -44,14 +44,15 @@ makeLenses ''RustNBodyExperiment
 instance Experiment RustNBodyExperiment where
     withExperiment f = do rnbLock  <- newMVar ()
                           rnbStats <- newMVar $ NBStats 0 1
-                          withAsync (nbWorker rnbLock rnbStats) $ \_ ->
-                              f $ RustNBodyExperiment { .. }
+                          --withAsync (nbWorker rnbLock rnbStats) $ \_ ->
+                          f $ RustNBodyExperiment { .. }
     experimentName _ = "RustNBody"
     experimentDraw fb _tick =
         gets rnbLock >>= \lock ->
             liftIO . void $ withMVar lock $ \_ ->
                 fillFrameBuffer fb $ \w h vec ->
-                    VSM.unsafeWith vec $ \pvec ->
+                    VSM.unsafeWith vec $ \pvec -> do
+                        nbStep
                         nbDraw (fromIntegral w) (fromIntegral h) pvec
     experimentStatusString = do
         NBStats nsteps avgtime <- liftIO . readMVar =<< gets rnbStats

@@ -21,6 +21,7 @@ import qualified BoundedSequence as BS
 import Experiment
 import RustSineExperiment
 import RustGoLExperiment
+import RustNBodyExperiment
 
 runOnAllCores :: IO ()
 runOnAllCores = GHC.Conc.getNumProcessors >>= setNumCapabilities
@@ -58,8 +59,9 @@ main = do
             traceSystemInfo
             _asCurTick <- getTick
             let _aeExperiments =
-                    [ AnyWithExperiment (withExperiment :: WithExperiment RustSineExperiment)
-                    , AnyWithExperiment (withExperiment :: WithExperiment RustGoLExperiment )
+                    [ AnyWithExperiment (withExperiment :: WithExperiment RustSineExperiment )
+                    , AnyWithExperiment (withExperiment :: WithExperiment RustGoLExperiment  )
+                    , AnyWithExperiment (withExperiment :: WithExperiment RustNBodyExperiment)
                     ]
                 ae = AppEnv { .. }
                 as = AppState { _asLastEscPress   = -1

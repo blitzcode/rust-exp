@@ -66,7 +66,9 @@ instance Experiment RustGoLExperiment where
     experimentStatusString = do
         GoLStats ngen avgtime <- liftIO . readMVar =<< gets rgolStats
         nt <- liftIO . readMVar =<< gets rgolLock
-        return $ printf "256^2 Grid, %iGs, %.2fms, %iGPS\n[RGAFK] Pattern | Threads [T][t]: %i"
+        return $ printf ( "256^2 Grid, %iGs, %.2fms, %iGPS\n[RGAFK] Pattern | Threads [T][t]: %i "
+                          ++ "(Simulation and Rendering is decoupled)"
+                        )
                         ngen
                         (avgtime * 1000)
                         (round $ 1 / avgtime :: Int)

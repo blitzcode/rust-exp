@@ -60,6 +60,7 @@ processGLFWEvent ev = do
                 GLFW.Key'S     -> view aeFB >>= \fb -> liftIO $ saveFrameBufferToPNG fb .
                                     map (\c -> if c `elem` ['/', '\\', ':', ' '] then '-' else c)
                                       . printf "Screenshot-%s.png" =<< show <$> getZonedTime
+                GLFW.Key'V     -> asVSync %= not >> setVSync
                                   -- Exit and switch to a different experiment
                 GLFW.Key'Minus -> onRenderSettingsChage >> left ExpPrev
                 GLFW.Key'Equal -> onRenderSettingsChage >> left ExpNext
@@ -98,28 +99,31 @@ draw = do
     -- Render everything quad based
     (liftIO $ GLFW.getFramebufferSize _aeWindow) >>= \(w, h) ->
         void . withQuadRenderBuffer _aeQR w h $ \qb -> do
-            -- Draw frame buffer contents
-            liftIO $ drawFrameBuffer _aeFB qb 0 0 (fromIntegral w) (fromIntegral h)
-            -- FPS counter and mode display
-            liftIO $ drawQuad qb
-                              0                (fromIntegral h - 36)
-                              (fromIntegral w) (fromIntegral h)
-                              2
-                              FCBlack
-                              (TRBlend 0.5)
-                              Nothing
-                              QuadUVDefault
-            ftStr <- updateAndReturnFrameTimes
-            (fbWdh, fbHgt) <- liftIO $ getFrameBufferDim _aeFB
-            expDesc <- use asExperimentDesc
+            ftStr           <- updateAndReturnFrameTimes
+            (fbWdh, fbHgt)  <- liftIO $ getFrameBufferDim _aeFB
+            expDesc         <- use asExperimentDesc
             expStatusString <- runExperimentState experimentStatusString
-            liftIO . drawTextWithShadow _aeFontTexture qb 3 (h - 12) $
-                printf "2x[ESC] Exit | [S]creenshot | %ix%i | %s\nExp. [-][=] %s | %s"
-                       fbWdh
-                       fbHgt
-                       ftStr
-                       expDesc
-                       expStatusString
+            vsync           <- use asVSync
+            liftIO $ do
+                -- Draw frame buffer contents
+                drawFrameBuffer _aeFB qb 0 0 (fromIntegral w) (fromIntegral h)
+                -- FPS counter and mode / statistics / key bindings display
+                drawQuad qb
+                         0                (fromIntegral h - 36)
+                         (fromIntegral w) (fromIntegral h)
+                         2
+                         FCBlack
+                         (TRBlend 0.5)
+                         Nothing
+                         QuadUVDefault
+                drawTextWithShadow _aeFontTexture qb 3 (h - 12) $ printf
+                    "2x[ESC] Exit | [S]creenshot | %ix%i | %s\n[V]Sync: %s | Exp. [-][=] %s | %s"
+                    fbWdh
+                    fbHgt
+                    ftStr
+                    (if vsync then "On" else "Off")
+                    expDesc
+                    expStatusString
   where drawTextWithShadow :: GL.TextureObject -> QuadRenderBuffer -> Int -> Int -> String -> IO ()
         drawTextWithShadow tex qb x y str = do
             drawText tex qb (x + 1) (y - 1) 0x00000000 str
@@ -142,12 +146,15 @@ updateAndReturnFrameTimes = do
                         (1.0 / fdWorst)
                         (1.0 / fdBest)
 
+setVSync :: (MonadIO m, MonadState AppState m) => m ()
+setVSync = use asVSync >>= \vsync -> liftIO . GLFW.swapInterval $ if vsync then 1 else 0
+
 run :: AppEnv -> AppState -> IO ()
 run env st =
     -- Setup state, reader, OpenGL / GLFW and enter loop
     flip runReaderT env . flip evalStateT st $ do
         resize
-        liftIO $ GLFW.swapInterval 1
+        setVSync
         experimentLoop 0
   where -- Initialize / shutdown / switch experiment
         experimentLoop :: Int -> StateT AppState (ReaderT AppEnv IO) ()

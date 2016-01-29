@@ -25,6 +25,7 @@ data AppState = AppState { _asCurTick        :: !Double
                          , _asLastEscPress   :: !Double
                          , _asFrameTimes     :: !(BS.BoundedSequence Double)
                          , _asFrameIdx       :: !Int
+                         , _asVSync          :: !Bool
                          , _asExperiment     :: !AnyExperiment
                          , _asExperimentDesc :: !String
                          }

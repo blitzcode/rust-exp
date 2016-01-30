@@ -12,8 +12,6 @@ import Control.Monad.IO.Class
 import Control.Lens
 import Control.Monad
 import Control.Monad.State.Class
-import Control.Concurrent.MVar
-import Control.Concurrent.Async
 import Foreign.C.Types
 import Foreign.Ptr
 import Data.Word
@@ -31,34 +29,29 @@ import GLFWHelpers
 
 -- N-Body Simulation
 
-data NBStats = NBStats !Int !Double
-               deriving (Show, Eq)
-
 data RustNBodyExperiment = RustNBodyExperiment
-    { rnbLock  :: MVar ()      -- Serialize main / worker thread access to Rust code
-    , rnbStats :: MVar NBStats -- Statistics from the worker thread
+    { _rnbNumSteps :: !Int
+    , _rnbTimes    :: !(BS.BoundedSequence Double)
     }
 
 makeLenses ''RustNBodyExperiment
 
 instance Experiment RustNBodyExperiment where
-    withExperiment f = do rnbLock  <- newMVar ()
-                          rnbStats <- newMVar $ NBStats 0 1
-                          --withAsync (nbWorker rnbLock rnbStats) $ \_ ->
-                          liftIO $ nbStableOrbits 1000 0.5 30.0
-                          f $ RustNBodyExperiment { .. }
+    withExperiment f = do liftIO $ nbStableOrbits 1000 0.5 30.0
+                          f $ RustNBodyExperiment { _rnbNumSteps = 0, _rnbTimes = BS.empty 30 }
     experimentName _ = "RustNBody"
-    experimentDraw fb _tick =
-        gets rnbLock >>= \lock ->
-            liftIO . void $ withMVar lock $ \_ ->
-                fillFrameBuffer fb $ \w h vec ->
-                    VSM.unsafeWith vec $ \pvec -> do
-                        nbStep
-                        nbDraw (fromIntegral w) (fromIntegral h) pvec
+    experimentDraw fb _tick = do
+        time <- fst <$> liftIO (timeIt nbStep) -- Simulate first
+        void . liftIO . fillFrameBuffer fb $ \w h vec ->
+            VSM.unsafeWith vec $ \pvec ->
+                nbDraw (fromIntegral w) (fromIntegral h) pvec
+        rnbNumSteps += 1
+        rnbTimes    %= BS.push_ time
     experimentStatusString = do
-        NBStats nsteps avgtime <- liftIO . readMVar =<< gets rnbStats
-        return $ printf "%i Steps, %.2fms, %iSPS\n"
-                        nsteps
+        RustNBodyExperiment { .. } <- get
+        let avgtime = fromMaybe 1 . median . BS.toList $ _rnbTimes
+        return $ printf "%iS, %.2fms, %iSPS\n"
+                        _rnbNumSteps
                         (avgtime * 1000)
                         (round $ 1 / avgtime :: Int)
     experimentGLFWEvent ev = do
@@ -68,21 +61,6 @@ instance Experiment RustNBodyExperiment where
                     GLFW.Key'A -> return ()
                     _          -> return ()
             _ -> return ()
-
--- Worker thread does computation, gets stalled when we draw / setup the particles
-nbWorker :: MVar () -> MVar NBStats -> IO ()
-nbWorker lock stats = go (BS.empty 30) (0 :: Int)
-    where go !bs !nsteps = do
-              -- Timed NBody step
-              time <- withMVar lock $ \_ ->
-                  fst <$> timeIt nbStep
-              -- Update stats and keep going
-              let bs' = BS.push_ time bs
-              modifyMVar stats $ \_ ->
-                  return ( NBStats nsteps (fromMaybe 1 . median . BS.toList $ bs')
-                         , ()
-                         )
-              go bs' (nsteps + 1)
 
 foreign import ccall "nb_draw"          nbDraw         :: CInt -> CInt -> Ptr Word32 -> IO ()
 foreign import ccall "nb_step"          nbStep         :: IO ()

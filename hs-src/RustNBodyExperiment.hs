@@ -32,16 +32,21 @@ import GLFWHelpers
 data RustNBodyExperiment = RustNBodyExperiment
     { _rnbNumSteps :: !Int
     , _rnbTimes    :: !(BS.BoundedSequence Double)
+    , _rnbTimeStep :: !Double
     }
 
 makeLenses ''RustNBodyExperiment
 
 instance Experiment RustNBodyExperiment where
     withExperiment f = do liftIO $ nbStableOrbits 1000 0.5 30.0
-                          f $ RustNBodyExperiment { _rnbNumSteps = 0, _rnbTimes = BS.empty 30 }
+                          f $ RustNBodyExperiment { _rnbNumSteps = 0
+                                                  , _rnbTimes    = BS.empty 30
+                                                  , _rnbTimeStep = 0.01
+                                                  }
     experimentName _ = "RustNBody"
     experimentDraw fb _tick = do
-        time <- fst <$> liftIO (timeIt nbStep) -- Simulate first
+        dt <- use rnbTimeStep
+        time <- fst <$> liftIO (timeIt . nbStep . realToFrac $ dt) -- Simulate first
         void . liftIO . fillFrameBuffer fb $ \w h vec ->
             VSM.unsafeWith vec $ \pvec ->
                 nbDraw (fromIntegral w) (fromIntegral h) pvec
@@ -51,23 +56,27 @@ instance Experiment RustNBodyExperiment where
         RustNBodyExperiment { .. } <- get
         let avgtime = fromMaybe 1 . median . BS.toList $ _rnbTimes
         return $ printf ( "%i Steps, %.2fms, %i Steps/Second\n" ++
-                         "(Rendering and Simulation coupled) | [QWE] Setup Particles"
+                         "(Rendering and Simulation coupled) | [QWE] Setup Particles | " ++
+                         "Time Step [T][t]: %.4f"
                         )
                         _rnbNumSteps
                         (avgtime * 1000)
                         (round $ 1 / avgtime :: Int)
+                        _rnbTimeStep
     experimentGLFWEvent ev = do
         case ev of
-            GLFWEventKey _win k _sc ks _mk | ks == GLFW.KeyState'Pressed ->
+            GLFWEventKey _win k _sc ks mk | ks == GLFW.KeyState'Pressed ->
                 case k of
                     GLFW.Key'Q -> liftIO $ nbStableOrbits 1000 0.5 30.0
                     GLFW.Key'W -> liftIO $ nbRandomDisk   1000
                     GLFW.Key'E -> liftIO $ nbStableOrbits 5 5.0 40.0
+                    GLFW.Key'T | GLFW.modifierKeysShift mk -> rnbTimeStep //= 2
+                               | otherwise                 -> rnbTimeStep  *= 2
                     _          -> return ()
             _ -> return ()
 
 foreign import ccall "nb_draw"          nbDraw         :: CInt -> CInt -> Ptr Word32 -> IO ()
-foreign import ccall "nb_step"          nbStep         :: IO ()
+foreign import ccall "nb_step"          nbStep         :: CFloat -> IO ()
 foreign import ccall "nb_random_disk"   nbRandomDisk   :: CInt -> IO ()
 foreign import ccall "nb_stable_orbits" nbStableOrbits :: CInt -> CFloat -> CFloat -> IO ()
 

@@ -88,7 +88,7 @@ pub extern fn nb_stable_orbits(num_particles: i32, rmin: f32, rmax: f32) -> () {
 }
 
 #[no_mangle]
-pub extern fn nb_step() -> () {
+pub extern fn nb_step(dt : f32) -> () {
     let mut particles_mtx = PARTICLES.lock().unwrap();
 
     // Compute forces
@@ -116,7 +116,7 @@ pub extern fn nb_step() -> () {
                 let dy = b.py - a.py;
                 let dist = (dx * dx + dy * dy).sqrt();
 
-                let eps = 0.00001; // Softening factor, prevent singularities
+                let eps = 0.0001; // Softening factor, prevent singularities
                 let f = a.m * b.m / (dist * dist + eps);
 
                 mforces[i].fx += f * dx; // / dist;
@@ -130,8 +130,6 @@ pub extern fn nb_step() -> () {
     // Update positions and velocities
     {
         let mut particles = &mut (* particles_mtx);
-
-        let dt = 0.01;
 
         for i in 0..particles.len() {
             particles[i].vx += dt * forces[i].fx / particles[i].m;

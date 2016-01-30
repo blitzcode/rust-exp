@@ -193,6 +193,7 @@ pub extern fn nb_step_barnes_hut(theta : f32, dt : f32) -> () {
 
         fn has_children(&self) -> bool { self.children.is_some() }
 
+        // TODO: This crashes when we infinitely recurse on bogus values, add some checks
         fn insert(&mut self, px: f32, py: f32, m: f32) {
             if self.has_children() {
                 // Interior node, accumulate mass and keep traversing
@@ -202,6 +203,10 @@ pub extern fn nb_step_barnes_hut(theta : f32, dt : f32) -> () {
                     Some(ref mut children) => {
                         children[quadrant as usize].insert(px, py, m);
                     }
+                    // TODO: We could avoid this awkward case if we just pattern matched
+                    //       instead of using has_children() in the first place, but
+                    //       convincing Rust's borrow checker to let us do this is
+                    //       another matter
                     None => { panic!("children missing") }
                 }
             } else {
@@ -209,7 +214,11 @@ pub extern fn nb_step_barnes_hut(theta : f32, dt : f32) -> () {
                     // No mass means empty exterior node, just insert particle here
                     assert!(self.has_children() == false);
                     assert!(m > 0.0);
-                    self.add_mass(px, py, m);
+                    // TODO: FP inaccuracy makes self check fail later
+                    //self.add_mass(px, py, m); 
+                    self.px = px;
+                    self.py = py;
+                    self.m  = m;
                 } else {
                     // Non-empty exterior node, first split and move particle to child
                     self.insert_children();
@@ -270,6 +279,9 @@ pub extern fn nb_step_barnes_hut(theta : f32, dt : f32) -> () {
                     }
                 }
                 None => {
+                    // Skip our own entry in the tree
+                    if self.px == px && self.py == py { return (0.0, 0.0) }
+
                     let dx = self.px - px;
                     let dy = self.py - py;
                     let dist = (dx * dx + dy * dy).sqrt();
@@ -277,8 +289,8 @@ pub extern fn nb_step_barnes_hut(theta : f32, dt : f32) -> () {
                     let eps = 0.0001;
                     let f = m * self.m / (dist * dist + eps);
 
-                fx = f * dx; // / dist;
-                fy = f * dy; // / dist;
+                    fx = f * dx; // / dist;
+                    fy = f * dy; // / dist;
             }
             (fx, fy)
         }

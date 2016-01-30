@@ -4,6 +4,7 @@ use std::ptr;
 use rand;
 use rand::distributions::{IndependentSample, Range};
 use std::f32::consts;
+use std::f32;
 use std::cmp::min;
 
 #[derive(Clone, Copy)]
@@ -94,7 +95,16 @@ pub extern fn nb_stable_orbits(num_particles: i32, rmin: f32, rmax: f32) -> () {
 }
 
 #[no_mangle]
-pub extern fn nb_step(dt : f32) -> () {
+pub extern fn nb_step_brute_force(dt : f32) -> () {
+    // Brute-force O(N^2) simulation algorithm. This is completely unoptimized, we even
+    // compute the forces twice for each particle pair and do none of the obvious
+    // arithmetic optimizations like factoring out one of the particle masses etc.
+    //
+    // References:
+    //
+    // http://http.developer.nvidia.com/GPUGems3/gpugems3_ch31.html
+    // http://physics.princeton.edu/~fpretori/Nbody/code.htm
+
     let mut particles_mtx = PARTICLES.lock().unwrap();
 
     // Compute forces
@@ -118,6 +128,9 @@ pub extern fn nb_step(dt : f32) -> () {
 
                 let b = &particles[j];
 
+                // Compute forces between particle pair
+                // https://en.wikipedia.org/wiki/Newton's_law_of_universal_gravitation#Vector_form
+
                 let dx = b.px - a.px;
                 let dy = b.py - a.py;
                 let dist = (dx * dx + dy * dy).sqrt();
@@ -138,6 +151,7 @@ pub extern fn nb_step(dt : f32) -> () {
         let mut particles = &mut (* particles_mtx);
 
         for i in 0..particles.len() {
+            // F = ma, a = F / m
             particles[i].vx += dt * forces[i].fx / particles[i].m;
             particles[i].vy += dt * forces[i].fy / particles[i].m;
 
@@ -145,6 +159,60 @@ pub extern fn nb_step(dt : f32) -> () {
             particles[i].py += dt * particles[i].vy;
         }
     }
+}
+
+#[no_mangle]
+pub extern fn nb_step_barnes_hut(dt : f32) -> () {
+    // Hierarchical O(n log n) simulation algorithm using the Barnes-Hut approximation algorithm
+    //
+    // References:
+    //
+    // https://en.wikipedia.org/wiki/Barnes%E2%80%93Hut_simulation
+    // http://arborjs.org/docs/barnes-hut
+
+    let mut particles_mtx = PARTICLES.lock().unwrap();
+    let mut particles = &(* particles_mtx);
+
+    // Quad tree
+    //#[derive(Copy)]
+    struct Node {
+        // AABB
+        x1 : f32, y1 : f32, x2 : f32, y2 : f32,
+        // Center of mass + total mass for interior nodes,
+        // contained particle exterior ones
+        px : f32, py : f32, m : f32,
+        // Child nodes
+        children: [Option<Box<Node>>; 4]
+    }
+    impl Node {
+        fn new(x1: f32, y1: f32, x2: f32, y2: f32) -> Node {
+            Node {
+                x1: x1, y1: y1, x2: x2, y2: y2,
+                px: 0.0, py: 0.0, m: 0.0,
+                children: [None, None, None, None]
+            }
+        }
+    }
+
+    // AABB of the whole simulation
+    let mut x1 = f32::MAX;
+    let mut y1 = f32::MAX;
+    let mut x2 = f32::MIN;
+    let mut y2 = f32::MIN;
+    for p in particles {
+        // No Ord trait for f32, hence no min/max
+        x1 = if p.px < x1 { p.px } else { x1 };
+        y1 = if p.py < y1 { p.py } else { y1 };
+        x2 = if p.px < x2 { p.px } else { x2 };
+        y2 = if p.py < y2 { p.py } else { y2 };
+    }
+
+    // Root node
+    let mut tree = Node::new(x1, y1, x2, y2);
+
+    // Insert all particles
+
+    // Compute forces using quad tree
 }
 
 #[no_mangle]

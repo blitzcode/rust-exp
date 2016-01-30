@@ -45,6 +45,7 @@ instance Experiment RustNBodyExperiment where
     withExperiment f = do rnbLock  <- newMVar ()
                           rnbStats <- newMVar $ NBStats 0 1
                           --withAsync (nbWorker rnbLock rnbStats) $ \_ ->
+                          liftIO $ nbStableOrbits 1000 0.5 30.0
                           f $ RustNBodyExperiment { .. }
     experimentName _ = "RustNBody"
     experimentDraw fb _tick =
@@ -83,6 +84,8 @@ nbWorker lock stats = go (BS.empty 30) (0 :: Int)
                          )
               go bs' (nsteps + 1)
 
-foreign import ccall "nb_draw" nbDraw :: CInt -> CInt -> Ptr Word32 -> IO ()
-foreign import ccall "nb_step" nbStep :: IO ()
+foreign import ccall "nb_draw"          nbDraw         :: CInt -> CInt -> Ptr Word32 -> IO ()
+foreign import ccall "nb_step"          nbStep         :: IO ()
+foreign import ccall "nb_random_disk"   nbRandomDisk   :: CInt -> IO ()
+foreign import ccall "nb_stable_orbits" nbStableOrbits :: CInt -> CFloat -> CFloat -> IO ()
 

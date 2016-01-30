@@ -14,6 +14,39 @@ struct Particle {
     m  : f32
 }
 
+lazy_static! {
+    static ref PARTICLES: Mutex<Vec<Particle>> = {
+        Mutex::new(Vec::new())
+    };
+}
+
+#[no_mangle]
+pub extern fn nb_random_disk(num_particles: i32) -> () {
+    // Place particles with random position and velocity in a disk in the center of the viewport
+
+    let mut particles = PARTICLES.lock().unwrap();
+    particles.clear();
+
+    let mut rng = rand::thread_rng();
+    let vel  = Range::new(-3.5, 3.5);
+    let mass = Range::new( 0.1, 1.5);
+    let u    = Range::new( 0.0, 1.0);
+
+    for _ in 0..num_particles {
+        let mut x : f32 = u.ind_sample(&mut rng);
+        let mut y : f32 = u.ind_sample(&mut rng);
+        uniform_sample_disk(&mut x, &mut y);
+        x *= 20.0;
+        y *= 20.0;
+
+        particles.push(Particle { px: x,
+                                  py: y,
+                                  vx: vel.ind_sample(&mut rng),
+                                  vy: vel.ind_sample(&mut rng),
+                                  m:  mass.ind_sample(&mut rng) });
+    }
+}
+
 fn uniform_sample_disk(x: &mut f32, y: &mut f32) {
     let r = x.sqrt();
     let theta = 2.0 * consts::PI * (* y);
@@ -21,39 +54,37 @@ fn uniform_sample_disk(x: &mut f32, y: &mut f32) {
     * y = r * theta.sin();
 }
 
-lazy_static! {
-    static ref PARTICLES: Mutex<Vec<Particle>> = {
-        let mut v = Vec::new();
+#[no_mangle]
+pub extern fn nb_stable_orbits(num_particles: i32, rmin: f32, rmax: f32) -> () {
+    // Generate a bunch of 'planets' with a circular orbit around a 'sun'
+    //
+    // References:
+    //
+    // http://www.cs.cmu.edu/~./ph/859E/src/nbody/circ.p2
+    // www.cs.cmu.edu/~./ph/859E/src/nbody/nbody.cc
 
-        /*
-        v.push(Particle { px: 0.5, py: 0.5, vx: 0.0, vy: 0.0, m: 1000.0 });
+    let mut particles = PARTICLES.lock().unwrap();
+    particles.clear();
 
-        v.push(Particle { px: -8.23656 , py: 1.78778 , vx: -4.61142 , vy: -31.2847, m: 10.0 });
-        v.push(Particle { px: -4.12657, py:  -2.99729, vx:  19.069, vy:  -25.2264, m: 10.0 });
-        v.push(Particle { px: -6.00204, py: 27.3733, vx: -30.7359, vy: -7.4366, m: 10.0 });
-        */
+    let sun_mass    = 1000.0;
+    let planet_mass = 1.0;
+    let g : f32     = 1.0;
+    let speed       = (g * sun_mass).sqrt();
 
-        let mut rng = rand::thread_rng();
-        let vel = Range::new(-3.5, 3.5);
-        let mass = Range::new(0.1, 1.5);
-        let u = Range::new(0.0, 1.0);
+    let mut rng     = rand::thread_rng();
+    let u           = Range::new(0.0, 1.0);
 
-        for _ in 0..1000 {
-            let mut x : f32 = u.ind_sample(&mut rng);
-            let mut y : f32 = u.ind_sample(&mut rng);
-            uniform_sample_disk(&mut x, &mut y);
-            x *= 20.0;
-            y *= 20.0;
+    particles.push( Particle { px: 0.0, py: 0.0, vx: 0.0, vy: 0.0, m: sun_mass } );
 
-            v.push(Particle { px: x,
-                              py: y,
-                              vx: vel.ind_sample(&mut rng),
-                              vy: vel.ind_sample(&mut rng),
-                              m:  mass.ind_sample(&mut rng) });
-        }
-
-        Mutex::new(v)
-    };
+    for _ in 0..num_particles {
+        let r     = (rmax - rmin) * u.ind_sample(&mut rng) + rmin;
+        let theta = 2.0 * consts::PI * u.ind_sample(&mut rng);
+        particles.push( Particle { px: r * theta.cos(),
+                                   py: r * theta.sin(),
+                                   vx: -speed * theta.sin(),
+                                   vy:  speed * theta.cos(),
+                                   m: planet_mass });
+    }
 }
 
 #[no_mangle]
@@ -111,6 +142,8 @@ pub extern fn nb_step() -> () {
         }
     }
 }
+
+// TODO: Don't write scattered points to write combined memory
 
 #[no_mangle]
 pub extern fn nb_draw(w: i32, h: i32, fb: *mut u32) -> () {

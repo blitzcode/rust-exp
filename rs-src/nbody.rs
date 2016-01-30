@@ -4,6 +4,7 @@ use std::ptr;
 use rand;
 use rand::distributions::{IndependentSample, Range};
 use std::f32::consts;
+use std::cmp::min;
 
 #[derive(Clone, Copy)]
 struct Particle {
@@ -183,18 +184,38 @@ pub extern fn nb_draw(w: i32, h: i32, fb: *mut u32) -> () {
     }
 
     let particles = PARTICLES.lock().unwrap();
+
     for p in &(*particles) {
         // Translate from simulation to viewport coordinates
         let x = ((p.px - x1) * scalex) as i32;
         let y = ((p.py - y1) * scaley) as i32;
 
-        // Bounds check
-        if x < 0 || x >= w || y < 0 || y >= h { continue; }
+        // Draw semi-transparent particle with slightly more transparent tail
+        for i in 0..2 {
+            let xo;
+            let yo;
+            let col;
+            match i {
+                1 => {    // Tail
+                          let len = (p.vx * p.vx + p.vy * p.vy).sqrt();
+                          let vnx = p.vx / len;
+                          let vny = p.vy / len;
+                          xo = (x as f32 + 0.5 - vnx) as i32;
+                          yo = (y as f32 + 0.5 - vny) as i32;
+                          col = 0x00303030; 
+                     }
+                _ => { xo = x; yo = y; col = 0x00404040; }
+            }
 
-        // Draw particle
-        let idx = x + y * w;
-        unsafe {
-            * buf_ptr.offset(idx as isize) = 0x00FFFFFF;
+            // Bounds check
+            if xo < 0 || xo >= w || yo < 0 || yo >= h { continue; }
+
+            // Draw particle
+            let idx = xo + yo * w;
+            unsafe {
+                * buf_ptr.offset(idx as isize) =
+                    add_abgr32(* buf_ptr.offset(idx as isize), col);
+            }
         }
     }
 
@@ -211,5 +232,24 @@ pub extern fn nb_draw(w: i32, h: i32, fb: *mut u32) -> () {
     if buffer {
         unsafe { ptr::copy_nonoverlapping(buf_ptr, fb, (w * h) as usize); }
     }
+}
+
+fn add_abgr32(c1 : u32, c2 : u32) -> u32 {
+    let a1 = (c1 & 0xFF000000) >> 24;
+    let b1 = (c1 & 0x00FF0000) >> 16;
+    let g1 = (c1 & 0x0000FF00) >>  8;
+    let r1 = (c1 & 0x000000FF) >>  0;
+
+    let a2 = (c2 & 0xFF000000) >> 24;
+    let b2 = (c2 & 0x00FF0000) >> 16;
+    let g2 = (c2 & 0x0000FF00) >>  8;
+    let r2 = (c2 & 0x000000FF) >>  0;
+
+    let ar = min(255, a1 + a2);
+    let gr = min(255, g1 + g2);
+    let br = min(255, b1 + b2);
+    let rr = min(255, r1 + r2);
+
+    (ar << 24) | (gr << 16) | (br << 8) | (rr << 0)
 }
 

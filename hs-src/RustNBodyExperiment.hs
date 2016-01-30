@@ -55,13 +55,18 @@ instance Experiment RustNBodyExperiment where
     experimentStatusString = do
         RustNBodyExperiment { .. } <- get
         let avgtime = fromMaybe 1 . median . BS.toList $ _rnbTimes
+        np <- liftIO (fromIntegral <$> nbNumParticles :: IO Int)
         return $ printf ( "%i Steps, %.2fms, %i Steps/Second\n" ++
-                         "(Rendering and Simulation coupled) | [QWE] Setup Particles | " ++
+                         "%s Particles | [QWE] Setup Particles | " ++
                          "Time Step [T][t]: %.4f"
                         )
                         _rnbNumSteps
                         (avgtime * 1000)
                         (round $ 1 / avgtime :: Int)
+                        ( if   np > 999
+                          then show (np `div` 1000) ++ "K"
+                          else show np
+                        )
                         _rnbTimeStep
     experimentGLFWEvent ev = do
         case ev of
@@ -79,4 +84,5 @@ foreign import ccall "nb_draw"          nbDraw         :: CInt -> CInt -> Ptr Wo
 foreign import ccall "nb_step"          nbStep         :: CFloat -> IO ()
 foreign import ccall "nb_random_disk"   nbRandomDisk   :: CInt -> IO ()
 foreign import ccall "nb_stable_orbits" nbStableOrbits :: CInt -> CFloat -> CFloat -> IO ()
+foreign import ccall "nb_num_particles" nbNumParticles :: IO CInt
 

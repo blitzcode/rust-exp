@@ -140,7 +140,7 @@ updateAndReturnFrameTimes = do
         fdMedian         = fromMaybe 1 $ median frameDeltas
         fdWorst          = case frameDeltas of [] -> 0; xs -> maximum xs
         fdBest           = case frameDeltas of [] -> 0; xs -> minimum xs
-     in return $ printf "%.2fFPS/%.1fms (L: %.2f, H: %.2f)"
+     in return $ printf "%.2fFPS/%.1fms (L: %.2fms, H: %.2fms)"
                         (1.0 / fdMedian)
                         (fdMedian  * 1000)
                         (1.0 / fdWorst)

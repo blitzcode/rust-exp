@@ -22,6 +22,11 @@ lazy_static! {
 }
 
 #[no_mangle]
+pub extern fn nb_num_particles() -> i32 {
+    PARTICLES.lock().unwrap().len() as i32
+}
+
+#[no_mangle]
 pub extern fn nb_random_disk(num_particles: i32) -> () {
     // Place particles with random position and velocity in a disk in the center of the viewport
 
@@ -77,7 +82,7 @@ pub extern fn nb_stable_orbits(num_particles: i32, rmin: f32, rmax: f32) -> () {
 
     particles.push( Particle { px: 0.0, py: 0.0, vx: 0.0, vy: 0.0, m: sun_mass } );
 
-    for _ in 0..num_particles {
+    for _ in 0..num_particles - 1 {
         let r     = (rmax - rmin) * u.ind_sample(&mut rng) + rmin;
         let theta = 2.0 * consts::PI * u.ind_sample(&mut rng);
         particles.push( Particle { px: r * theta.cos(),

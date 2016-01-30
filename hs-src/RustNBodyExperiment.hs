@@ -50,7 +50,9 @@ instance Experiment RustNBodyExperiment where
     experimentStatusString = do
         RustNBodyExperiment { .. } <- get
         let avgtime = fromMaybe 1 . median . BS.toList $ _rnbTimes
-        return $ printf "%iS, %.2fms, %iSPS\n"
+        return $ printf ( "%i Steps, %.2fms, %i Steps/Second\n" ++
+                         "(Rendering and Simulation coupled) | [QWE] Setup Particles"
+                        )
                         _rnbNumSteps
                         (avgtime * 1000)
                         (round $ 1 / avgtime :: Int)
@@ -58,7 +60,9 @@ instance Experiment RustNBodyExperiment where
         case ev of
             GLFWEventKey _win k _sc ks _mk | ks == GLFW.KeyState'Pressed ->
                 case k of
-                    GLFW.Key'A -> return ()
+                    GLFW.Key'Q -> liftIO $ nbStableOrbits 1000 0.5 30.0
+                    GLFW.Key'W -> liftIO $ nbRandomDisk   1000
+                    GLFW.Key'E -> liftIO $ nbStableOrbits 5 5.0 40.0
                     _          -> return ()
             _ -> return ()
 

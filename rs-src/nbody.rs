@@ -174,76 +174,76 @@ pub extern fn nb_step_barnes_hut(theta : f32, dt : f32) -> () {
     #[derive(Copy, Clone)]
     enum Quadrant { UL, UR, LL, LR }
     struct Node {
-        // AABB
+        // AABB (TODO: Only need this at construction time, could just store width instead)
         x1 : f32, y1 : f32, x2 : f32, y2 : f32,
         // Center of mass + total mass for interior nodes,
         // contained particle exterior ones
         px : f32, py : f32, m : f32,
         // Child nodes
-        children: [Option<Box<Node>>; 4]
+        children: Option<[Box<Node>; 4]>
     }
     impl Node {
         fn new(x1: f32, y1: f32, x2: f32, y2: f32) -> Node {
             Node {
                 x1: x1, y1: y1, x2: x2, y2: y2,
                 px: 0.0, py: 0.0, m: 0.0,
-                children: [None, None, None, None]
+                children: None
             }
         }
 
-        fn has_children(&self) -> bool {
-            for q in &self.children {
-                if q.is_some() { return true }
-            }
-            false
-        }
+        fn has_children(&self) -> bool { self.children.is_some() }
 
-        fn insert(&mut self, particle : &Particle) {
-            if self.m == 0.0 {
-                // No mass, empty node, just insert particle here
-                assert!(self.has_children() == false);
-                assert!(particle.m > 0.0);
-                self.add_mass(particle);
-            } else {
-                // Accumulate at current interior node
-                self.add_mass(particle);
-
-                // Determine quadrant for insertion
-                let quadrant = self.quadrant_from_point(particle.px, particle.py);
-
-                // Do we need to create a new child?
-                match self.children[quadrant as usize] {
-                    Some(ref mut child) => child.insert(particle),
-                    None => {
-                        // Create child and try inserting again
-                        self.insert_child(quadrant);
-                        match self.children[quadrant as usize] {
-                            Some(ref mut child) => child.insert(particle),
-                            None => panic!("insert_child() failed")
-                        }
+        fn insert(&mut self, px: f32, py: f32, m: f32) {
+            if self.has_children() {
+                // Interior node, accumulate mass and keep traversing
+                self.add_mass(px, py, m);
+                let quadrant = self.quadrant_from_point(px, py);
+                match self.children {
+                    Some(ref mut children) => {
+                        children[quadrant as usize].insert(px, py, m);
                     }
+                    None => { panic!("children missing") }
+                }
+            } else {
+                if self.m == 0.0 {
+                    // No mass means empty exterior node, just insert particle here
+                    assert!(self.has_children() == false);
+                    assert!(m > 0.0);
+                    self.add_mass(px, py, m);
+                } else {
+                    // Non-empty exterior node, first split and move particle to child
+                    self.insert_children();
+                    let px_original = self.px;
+                    let py_original = self.py;
+                    let m_original  = self.m;
+                    self.px = 0.0;
+                    self.py = 0.0;
+                    self.m  = 0.0;
+                    self.insert(px_original, py_original, m_original);
+                    // Now keep traversing
+                    self.insert(px, py, m);
                 }
             }
         }
 
-        fn insert_child(&mut self, quadrant : Quadrant) {
-            assert!(match self.children[quadrant as usize] { None => true, _ => false });
+        fn insert_children(&mut self) {
+            assert!(self.has_children() == false);
             let cx = (self.x1 + self.x2) * 0.5;
             let cy = (self.y1 + self.y2) * 0.5;
-            self.children[quadrant as usize] = match quadrant {
-                Quadrant::UL => Some(Box::new(Node::new(self.x1, cy     , cx     , self.y2))),
-                Quadrant::UR => Some(Box::new(Node::new(cx     , cy     , self.x2, self.y2))),
-                Quadrant::LL => Some(Box::new(Node::new(self.x1, self.y1, cx     , cy     ))),
-                Quadrant::LR => Some(Box::new(Node::new(cx     , self.y1, self.x2, cy     )))
-            }
+            self.children = Some([
+                Box::new(Node::new(self.x1, cy     , cx     , self.y2)), // UL
+                Box::new(Node::new(cx     , cy     , self.x2, self.y2)), // UR
+                Box::new(Node::new(self.x1, self.y1, cx     , cy     )), // LL
+                Box::new(Node::new(cx     , self.y1, self.x2, cy     ))  // LR
+            ])
         }
 
-        fn add_mass(&mut self, particle : &Particle) {
+        fn add_mass(&mut self, px: f32, py: f32, m: f32) {
             // Add particle mass, update center of gravity
-            let inv_msum = 1.0 / (self.m + particle.m);
-            self.px = (self.px * self.m + particle.px * particle.m) * inv_msum;
-            self.py = (self.py * self.m + particle.py * particle.m) * inv_msum;
-            self.m += particle.m;
+            let inv_msum = 1.0 / (self.m + m);
+            self.px = (self.px * self.m + px * m) * inv_msum;
+            self.py = (self.py * self.m + py * m) * inv_msum;
+            self.m += m;
         }
 
         fn quadrant_from_point(&self, x: f32, y: f32) -> Quadrant {
@@ -257,25 +257,25 @@ pub extern fn nb_step_barnes_hut(theta : f32, dt : f32) -> () {
             }
         }
 
-        fn compute_force(&self, particle : &Particle) -> (f32, f32) {
+        fn compute_force(&self, px: f32, py: f32, m: f32) -> (f32, f32) {
             let mut fx = 0.0;
             let mut fy = 0.0;
-            if self.has_children() {
-                for &ref q in &self.children {
-                    let (fx_add, fy_add) = match q {
-                        &Some(ref child) => child.compute_force(particle),
-                        &None => (0.0, 0.0)
-                    };
-                    fx += fx_add;
-                    fy += fy_add;
+            match self.children {
+                Some(ref children) => {
+                    for child in children {
+                        let (fx_add, fy_add) =
+                            child.compute_force(px, py, m);
+                        fx += fx_add;
+                        fy += fy_add;
+                    }
                 }
-            } else {
-                let dx = self.px - particle.px;
-                let dy = self.py - particle.py;
-                let dist = (dx * dx + dy * dy).sqrt();
+                None => {
+                    let dx = self.px - px;
+                    let dy = self.py - py;
+                    let dist = (dx * dx + dy * dy).sqrt();
 
-                let eps = 0.0001;
-                let f = particle.m * self.m / (dist * dist + eps);
+                    let eps = 0.0001;
+                    let f = m * self.m / (dist * dist + eps);
 
                 fx = f * dx; // / dist;
                 fy = f * dy; // / dist;
@@ -309,7 +309,7 @@ pub extern fn nb_step_barnes_hut(theta : f32, dt : f32) -> () {
 
         // Insert all particles into the tree
         for p in particles {
-            tree.insert(p);
+            tree.insert(p.px, p.py, p.m);
         }
     }
 
@@ -317,9 +317,9 @@ pub extern fn nb_step_barnes_hut(theta : f32, dt : f32) -> () {
     {
         let particles = &mut (* particles_mtx);
 
-        // Compute forces using quad tree
+        // Compute forces using the quad tree
         for p in particles {
-            let (fx, fy) = tree.compute_force(&p);
+            let (fx, fy) = tree.compute_force(p.px, p.py, p.m);
 
             // Update velocity and position
             p.vx += dt * fx / p.m;

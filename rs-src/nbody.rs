@@ -143,12 +143,16 @@ pub extern fn nb_step() -> () {
     }
 }
 
-// TODO: Don't write scattered points to write combined memory
-
 #[no_mangle]
 pub extern fn nb_draw(w: i32, h: i32, fb: *mut u32) -> () {
-    // Clear background
-    unsafe { ptr::write_bytes(fb, 0, (w * h) as usize); }
+    // If writing scattered points to write combined memory turns out to be a problem,
+    // enabled buffering
+    let buffer = false;
+
+    if !buffer {
+        // Clear background
+        unsafe { ptr::write_bytes(fb, 0, (w * h) as usize); }
+    }
 
     // Specify viewport over simulation to be mapped to the framebuffer
     let vp_wdh   = 100.0;
@@ -170,6 +174,16 @@ pub extern fn nb_draw(w: i32, h: i32, fb: *mut u32) -> () {
     let scalex = (1.0 / vpw) * w as f32;
     let scaley = (1.0 / vph) * h as f32;
 
+    // Optionally allocate buffer
+    let buf_ptr;
+    if buffer {
+        let mut buf = Vec::new();
+        buf.resize((w * h) as usize, 0u32);
+        buf_ptr = buf.as_mut_ptr();
+    } else {
+        buf_ptr = fb;
+    }
+
     let particles = PARTICLES.lock().unwrap();
     for p in &(*particles) {
         // Translate from simulation to viewport coordinates
@@ -182,17 +196,22 @@ pub extern fn nb_draw(w: i32, h: i32, fb: *mut u32) -> () {
         // Draw particle
         let idx = x + y * w;
         unsafe {
-            * fb.offset(idx as isize) = 0x00FFFFFF;
+            * buf_ptr.offset(idx as isize) = 0x00FFFFFF;
         }
     }
 
     // Debug draw center cross
     unsafe {
-        * fb.offset((w / 2 + 0 + (h / 2 + 0) * w) as isize) = 0x00FF00FF;
-        * fb.offset((w / 2 + 1 + (h / 2 + 0) * w) as isize) = 0x00FF00FF;
-        * fb.offset((w / 2 + 0 + (h / 2 + 1) * w) as isize) = 0x00FF00FF;
-        * fb.offset((w / 2 - 1 + (h / 2 + 0) * w) as isize) = 0x00FF00FF;
-        * fb.offset((w / 2 + 0 + (h / 2 - 1) * w) as isize) = 0x00FF00FF;
+        * buf_ptr.offset((w / 2 + 0 + (h / 2 + 0) * w) as isize) = 0x00FF00FF;
+        * buf_ptr.offset((w / 2 + 1 + (h / 2 + 0) * w) as isize) = 0x00FF00FF;
+        * buf_ptr.offset((w / 2 + 0 + (h / 2 + 1) * w) as isize) = 0x00FF00FF;
+        * buf_ptr.offset((w / 2 - 1 + (h / 2 + 0) * w) as isize) = 0x00FF00FF;
+        * buf_ptr.offset((w / 2 + 0 + (h / 2 - 1) * w) as isize) = 0x00FF00FF;
+    }
+
+    // Output in one contiguous copy
+    if buffer {
+        unsafe { ptr::copy_nonoverlapping(buf_ptr, fb, (w * h) as usize); }
     }
 }
 

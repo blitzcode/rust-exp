@@ -46,7 +46,9 @@ instance Experiment RustNBodyExperiment where
     experimentName _ = "RustNBody"
     experimentDraw fb _tick = do
         dt <- use rnbTimeStep
-        time <- fst <$> liftIO (timeIt . nbStepBruteForce . realToFrac $ dt) -- Simulate first
+        -- Simulate first
+        let theta = 0.5 :: Float
+        time <- fst <$> liftIO (timeIt . nbStepBarnesHut (realToFrac theta) . realToFrac $ dt)
         void . liftIO . fillFrameBuffer fb $ \w h vec ->
             VSM.unsafeWith vec $ \pvec ->
                 nbDraw (fromIntegral w) (fromIntegral h) pvec
@@ -82,7 +84,7 @@ instance Experiment RustNBodyExperiment where
 
 foreign import ccall "nb_draw"             nbDraw           :: CInt -> CInt -> Ptr Word32 -> IO ()
 foreign import ccall "nb_step_brute_force" nbStepBruteForce :: CFloat -> IO ()
-foreign import ccall "nb_step_barnes_hut"  nbStepBarnesHut  :: CFloat -> IO ()
+foreign import ccall "nb_step_barnes_hut"  nbStepBarnesHut  :: CFloat -> CFloat -> IO ()
 foreign import ccall "nb_random_disk"      nbRandomDisk     :: CInt -> IO ()
 foreign import ccall "nb_stable_orbits"    nbStableOrbits   :: CInt -> CFloat -> CFloat -> IO ()
 foreign import ccall "nb_num_particles"    nbNumParticles   :: IO CInt

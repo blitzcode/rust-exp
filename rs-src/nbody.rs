@@ -162,7 +162,7 @@ pub extern fn nb_step_brute_force(dt : f32) -> () {
 }
 
 #[no_mangle]
-pub extern fn nb_step_barnes_hut(dt : f32) -> () {
+pub extern fn nb_step_barnes_hut(theta : f32, dt : f32) -> () {
     // Hierarchical O(n log n) simulation algorithm using the Barnes-Hut approximation algorithm
     //
     // References:
@@ -170,11 +170,9 @@ pub extern fn nb_step_barnes_hut(dt : f32) -> () {
     // https://en.wikipedia.org/wiki/Barnes%E2%80%93Hut_simulation
     // http://arborjs.org/docs/barnes-hut
 
-    let mut particles_mtx = PARTICLES.lock().unwrap();
-    let mut particles = &(* particles_mtx);
-
     // Quad tree
-    //#[derive(Copy)]
+    #[derive(Copy, Clone)]
+    enum Quadrant { UL, UR, LL, LR }
     struct Node {
         // AABB
         x1 : f32, y1 : f32, x2 : f32, y2 : f32,
@@ -192,27 +190,144 @@ pub extern fn nb_step_barnes_hut(dt : f32) -> () {
                 children: [None, None, None, None]
             }
         }
+
+        fn has_children(&self) -> bool {
+            for q in &self.children {
+                if q.is_some() { return true }
+            }
+            false
+        }
+
+        fn insert(&mut self, particle : &Particle) {
+            if self.m == 0.0 {
+                // No mass, empty node, just insert particle here
+                assert!(self.has_children() == false);
+                assert!(particle.m > 0.0);
+                self.add_mass(particle);
+            } else {
+                // Accumulate at current interior node
+                self.add_mass(particle);
+
+                // Determine quadrant for insertion
+                let quadrant = self.quadrant_from_point(particle.px, particle.py);
+
+                // Do we need to create a new child?
+                match self.children[quadrant as usize] {
+                    Some(ref mut child) => child.insert(particle),
+                    None => {
+                        // Create child and try inserting again
+                        self.insert_child(quadrant);
+                        match self.children[quadrant as usize] {
+                            Some(ref mut child) => child.insert(particle),
+                            None => panic!("insert_child() failed")
+                        }
+                    }
+                }
+            }
+        }
+
+        fn insert_child(&mut self, quadrant : Quadrant) {
+            assert!(match self.children[quadrant as usize] { None => true, _ => false });
+            let cx = (self.x1 + self.x2) * 0.5;
+            let cy = (self.y1 + self.y2) * 0.5;
+            self.children[quadrant as usize] = match quadrant {
+                Quadrant::UL => Some(Box::new(Node::new(self.x1, cy     , cx     , self.y2))),
+                Quadrant::UR => Some(Box::new(Node::new(cx     , cy     , self.x2, self.y2))),
+                Quadrant::LL => Some(Box::new(Node::new(self.x1, self.y1, cx     , cy     ))),
+                Quadrant::LR => Some(Box::new(Node::new(cx     , self.y1, self.x2, cy     )))
+            }
+        }
+
+        fn add_mass(&mut self, particle : &Particle) {
+            // Add particle mass, update center of gravity
+            let inv_msum = 1.0 / (self.m + particle.m);
+            self.px = (self.px * self.m + particle.px * particle.m) * inv_msum;
+            self.py = (self.py * self.m + particle.py * particle.m) * inv_msum;
+            self.m += particle.m;
+        }
+
+        fn quadrant_from_point(&self, x: f32, y: f32) -> Quadrant {
+            // We assume the point is inside the AABB
+            let cx = (self.x1 + self.x2) * 0.5;
+            let cy = (self.y1 + self.y2) * 0.5;
+            if y < cy {
+                if x < cx { Quadrant::LL } else { Quadrant::LR }
+            } else {
+                if x < cx { Quadrant::UL } else { Quadrant::UR }
+            }
+        }
+
+        fn compute_force(&self, particle : &Particle) -> (f32, f32) {
+            let mut fx = 0.0;
+            let mut fy = 0.0;
+            if self.has_children() {
+                for &ref q in &self.children {
+                    let (fx_add, fy_add) = match q {
+                        &Some(ref child) => child.compute_force(particle),
+                        &None => (0.0, 0.0)
+                    };
+                    fx += fx_add;
+                    fy += fy_add;
+                }
+            } else {
+                let dx = self.px - particle.px;
+                let dy = self.py - particle.py;
+                let dist = (dx * dx + dy * dy).sqrt();
+
+                let eps = 0.0001;
+                let f = particle.m * self.m / (dist * dist + eps);
+
+                fx = f * dx; // / dist;
+                fy = f * dy; // / dist;
+            }
+            (fx, fy)
+        }
     }
 
-    // AABB of the whole simulation
-    let mut x1 = f32::MAX;
-    let mut y1 = f32::MAX;
-    let mut x2 = f32::MIN;
-    let mut y2 = f32::MIN;
-    for p in particles {
-        // No Ord trait for f32, hence no min/max
-        x1 = if p.px < x1 { p.px } else { x1 };
-        y1 = if p.py < y1 { p.py } else { y1 };
-        x2 = if p.px < x2 { p.px } else { x2 };
-        y2 = if p.py < y2 { p.py } else { y2 };
+    let mut particles_mtx = PARTICLES.lock().unwrap();
+
+    // Build quad tree
+    let mut tree;
+    {
+        let particles = &(* particles_mtx);
+
+        // AABB of the whole simulation
+        let mut x1 = f32::MAX;
+        let mut y1 = f32::MAX;
+        let mut x2 = f32::MIN;
+        let mut y2 = f32::MIN;
+        for p in & (* particles_mtx) {
+            // No Ord trait for f32, hence no min/max
+            x1 = if p.px < x1 { p.px } else { x1 };
+            y1 = if p.py < y1 { p.py } else { y1 };
+            x2 = if p.px > x2 { p.px } else { x2 };
+            y2 = if p.py > y2 { p.py } else { y2 };
+        }
+
+        // Root node
+        tree = Node::new(x1, y1, x2, y2);
+
+        // Insert all particles into the tree
+        for p in particles {
+            tree.insert(p);
+        }
     }
 
-    // Root node
-    let mut tree = Node::new(x1, y1, x2, y2);
+    // Update particles
+    {
+        let particles = &mut (* particles_mtx);
 
-    // Insert all particles
+        // Compute forces using quad tree
+        for p in particles {
+            let (fx, fy) = tree.compute_force(&p);
 
-    // Compute forces using quad tree
+            // Update velocity and position
+            p.vx += dt * fx / p.m;
+            p.vy += dt * fy / p.m;
+            p.px += dt * p.vx;
+            p.py += dt * p.vy;
+        }
+    }
 }
 
 #[no_mangle]

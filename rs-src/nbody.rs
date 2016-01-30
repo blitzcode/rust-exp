@@ -187,24 +187,26 @@ pub extern fn nb_draw(w: i32, h: i32, fb: *mut u32) -> () {
 
     for p in &(*particles) {
         // Translate from simulation to viewport coordinates
-        let x = ((p.px - x1) * scalex) as i32;
-        let y = ((p.py - y1) * scaley) as i32;
+        let x = (p.px - x1) * scalex;
+        let y = (p.py - y1) * scaley;
 
         // Draw semi-transparent particle with slightly more transparent tail
         for i in 0..2 {
             let xo;
             let yo;
             let col;
-            match i {
-                1 => {    // Tail
-                          let len = (p.vx * p.vx + p.vy * p.vy).sqrt();
-                          let vnx = p.vx / len;
-                          let vny = p.vy / len;
-                          xo = (x as f32 + 0.5 - vnx) as i32;
-                          yo = (y as f32 + 0.5 - vny) as i32;
-                          col = 0x00303030; 
-                     }
-                _ => { xo = x; yo = y; col = 0x00404040; }
+            if i == 0 {
+                xo = x as i32;
+                yo = y as i32;
+                col = 0x00404040;
+            } else {
+                // Tail
+                let len = 1.0 / (p.vx * p.vx + p.vy * p.vy).sqrt();
+                let vnx = p.vx * len;
+                let vny = p.vy * len;
+                xo = (x + 0.3 - vnx) as i32;
+                yo = (y + 0.3 - vny) as i32;
+                col = 0x00303030;
             }
 
             // Bounds check
@@ -235,6 +237,11 @@ pub extern fn nb_draw(w: i32, h: i32, fb: *mut u32) -> () {
 }
 
 fn add_abgr32(c1 : u32, c2 : u32) -> u32 {
+    // Add two 32 bit ABGR values together
+    //
+    // TODO: In our case A is always 0 anyway, we could just add the components
+    //       together and combine them without any of the shifts
+
     let a1 = (c1 & 0xFF000000) >> 24;
     let b1 = (c1 & 0x00FF0000) >> 16;
     let g1 = (c1 & 0x0000FF00) >>  8;

@@ -189,7 +189,7 @@ pub extern fn nb_step_barnes_hut(theta : f32, dt : f32) -> () {
         // contained particle exterior ones
         px : f32, py : f32, m : f32,
         // Child nodes (TODO: Just store indices, half the storage, less scattered memory access)
-        children: Option<[Box<Node>; 4]>
+        children: Option<Box<[Node; 4]>>
     }
     impl Node {
         fn new(x1: f32, y1: f32, x2: f32, y2: f32) -> Node {
@@ -244,12 +244,12 @@ pub extern fn nb_step_barnes_hut(theta : f32, dt : f32) -> () {
             assert!(self.has_children() == false);
             let cx = (self.x1 + self.x2) * 0.5;
             let cy = (self.y1 + self.y2) * 0.5;
-            self.children = Some([
-                Box::new(Node::new(self.x1, cy     , cx     , self.y2)), // UL
-                Box::new(Node::new(cx     , cy     , self.x2, self.y2)), // UR
-                Box::new(Node::new(self.x1, self.y1, cx     , cy     )), // LL
-                Box::new(Node::new(cx     , self.y1, self.x2, cy     ))  // LR
-            ])
+            self.children = Some(Box::new([
+                Node::new(self.x1, cy     , cx     , self.y2), // UL
+                Node::new(cx     , cy     , self.x2, self.y2), // UR
+                Node::new(self.x1, self.y1, cx     , cy     ), // LL
+                Node::new(cx     , self.y1, self.x2, cy     )  // LR
+            ]))
         }
 
         fn add_mass(&mut self, px: f32, py: f32, m: f32) {
@@ -301,7 +301,7 @@ pub extern fn nb_step_barnes_hut(theta : f32, dt : f32) -> () {
                         fy = fy_add;
                     } else {
                         // Recurse
-                        for child in children {
+                        for child in children.into_iter() {
                             let (fx_add, fy_add) =
                                 child.compute_force(px, py, m, theta);
                             fx += fx_add;

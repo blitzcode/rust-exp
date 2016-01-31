@@ -6,6 +6,8 @@ use rand::distributions::{IndependentSample, Range};
 use std::f32::consts;
 use std::f32;
 use std::cmp::min;
+use std::thread;
+use std::sync::Arc;
 
 #[derive(Clone, Copy)]
 struct Particle {
@@ -175,7 +177,7 @@ fn force(px1: f32, py1: f32, m1: f32, px2: f32, py2: f32, m2: f32) -> (f32, f32)
 }
 
 #[no_mangle]
-pub extern fn nb_step_barnes_hut(theta : f32, dt : f32) -> () {
+pub extern fn nb_step_barnes_hut(theta : f32, dt : f32, nthreads: i32) -> () {
     // Hierarchical O(n log n) simulation using the Barnes-Hut approximation algorithm
     //
     // References:
@@ -343,7 +345,7 @@ pub extern fn nb_step_barnes_hut(theta : f32, dt : f32) -> () {
     let mut particles_mtx = PARTICLES.lock().unwrap();
 
     // Build quad tree
-    let mut tree;
+    let shared_tree;
     {
         let particles = &(* particles_mtx);
 
@@ -370,34 +372,62 @@ pub extern fn nb_step_barnes_hut(theta : f32, dt : f32) -> () {
         // }
 
         // Root node
-        tree = Node::new(x1, y1, x2, y2);
+        let mut tree = Node::new(x1, y1, x2, y2);
 
         // Insert all particles into the tree
         for p in particles {
             tree.insert(p.px, p.py, p.m, 0);
         }
+
+        shared_tree = Arc::new(tree);
     }
 
     // Update particles
     {
         let particles = &mut (* particles_mtx);
 
-        // Compute forces using the quad tree
-        //
-        // TODO: Parallelize this loop
-        for p in particles {
-            let (fx, fy) = tree.compute_force(p.px, p.py, p.m, theta);
+        let threads: Vec<_> = (0..nthreads).map(|i| {
+            // Slice of particles to be processed by the current thread
+            let range = particles.len() as i32 / nthreads;
+            let seg_low = range * i;
+            let seg_high =
+                if i == nthreads - 1 { particles.len() as i32 } else { range * (i + 1) };
 
-            // TODO: Try different integration scheme, Verlet / RK4 etc.
+            // Allow sharing of particle pointer with our threads
+            struct SendPtr {
+                ptr : *mut Particle
+            }
+            unsafe impl Send for SendPtr { }
+            let particle_ptr = particles.as_mut_ptr();
+            let particle_ptr_send = SendPtr { ptr: particle_ptr };
 
-            // Update velocity
-            // F = ma, a = F / m
-            p.vx += dt * fx / p.m;
-            p.vy += dt * fy / p.m;
+            let local_tree = shared_tree.clone();
 
-            // Update position
-            p.px += dt * p.vx;
-            p.py += dt * p.vy;
+            thread::spawn(move || {
+                let particle_ptr = particle_ptr_send.ptr; // Unwrap
+
+                for i in seg_low..seg_high {
+                    let p = unsafe { &mut *particle_ptr.offset(i as isize) };
+
+                    // Compute forces using the quad tree
+                    let (fx, fy) = local_tree.compute_force(p.px, p.py, p.m, theta);
+
+                    // TODO: Try different integration scheme, Verlet / RK4 etc.
+
+                    // Update velocity
+                    // F = ma, a = F / m
+                    p.vx += dt * fx / p.m;
+                    p.vy += dt * fy / p.m;
+
+                    // Update position
+                    p.px += dt * p.vx;
+                    p.py += dt * p.vy;
+                }
+            })
+        }).collect();
+
+        for thread in threads {
+            thread.join().unwrap();
         }
     }
 }

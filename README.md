@@ -9,7 +9,7 @@ Experiments include...
 
 - Simple 'scrolling sine waves' visualizer, proof-of-concept of the Rust -> Haskell -> OpenGL pipeline
 - The famous 'Game of Life' cellular automata, with a reasonably optimized and parallelized implementation plus recallable patterns
-- Gravitational N-Body simulation, both a brute force O(N^2) and the O(n log n) Barnes-Hut algorithm are implemented
+- Gravitational N-Body simulation, both a brute force O(N^2) and the O(n log n) Barnes-Hut algorithm are implemented, parallelized
 
 **If you want to read actual algorithm descriptions and references for these experiments, including more, higher quality images visit the following link to my website**
 

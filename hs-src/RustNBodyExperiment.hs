@@ -30,27 +30,32 @@ import GLFWHelpers
 -- N-Body Simulation
 
 data RustNBodyExperiment = RustNBodyExperiment
-    { _rnbNumSteps :: !Int
-    , _rnbTimes    :: !(BS.BoundedSequence Double)
-    , _rnbTimeStep :: !Double
-    , _rnbTheta    :: !Double
+    { _rnbNumSteps   :: !Int
+    , _rnbTimes      :: !(BS.BoundedSequence Double)
+    , _rnbTimeStep   :: !Double
+    , _rnbTheta      :: !Double
+    , _rnbNumThreads :: !Int
     }
 
 makeLenses ''RustNBodyExperiment
 
 instance Experiment RustNBodyExperiment where
     withExperiment f = do liftIO $ nbStableOrbits 10000 0.5 30.0
-                          f $ RustNBodyExperiment { _rnbNumSteps = 0
-                                                  , _rnbTimes    = BS.empty 30
-                                                  , _rnbTimeStep = 0.01
-                                                  , _rnbTheta    = 0.85
+                          f $ RustNBodyExperiment { _rnbNumSteps   = 0
+                                                  , _rnbTimes      = BS.empty 30
+                                                  , _rnbTimeStep   = 0.01
+                                                  , _rnbTheta      = 0.85
+                                                  , _rnbNumThreads = 1
                                                   }
     experimentName _ = "RustNBody"
     experimentDraw fb _tick = do
-        dt    <- use rnbTimeStep
-        theta <- use rnbTheta
+        dt       <- use rnbTimeStep
+        theta    <- use rnbTheta
+        nthreads <- use rnbNumThreads
         -- Simulate first
-        time <- fst <$> liftIO (timeIt $ nbStepBarnesHut (realToFrac theta) (realToFrac dt))
+        time <- fst <$> liftIO (timeIt $ nbStepBarnesHut (realToFrac theta)
+                                                         (realToFrac dt)
+                                                         (fromIntegral nthreads))
         void . liftIO . fillFrameBuffer fb $ \w h vec ->
             VSM.unsafeWith vec $ \pvec ->
                 nbDraw (fromIntegral w) (fromIntegral h) pvec
@@ -61,7 +66,8 @@ instance Experiment RustNBodyExperiment where
         let avgtime = fromMaybe 1 . median . BS.toList $ _rnbTimes
         np <- liftIO (fromIntegral <$> nbNumParticles :: IO Int)
         return $ printf ( "%i Steps, %.1fSPS/%.2fms | %s Bodies\n" ++
-                         "[QWE] Scene | Time Step [T][t]: %.4f | Theta [A][a]: %.2f"
+                         "[QWE] Scene | Time Step [T][t]: %.4f | Theta [A][a]: %.2f | " ++
+                         "Threads [P][p]: %i"
                         )
                         _rnbNumSteps
                         (1 / avgtime)
@@ -72,6 +78,7 @@ instance Experiment RustNBodyExperiment where
                         )
                         _rnbTimeStep
                         _rnbTheta
+                        _rnbNumThreads
     experimentGLFWEvent ev = do
         case ev of
             GLFWEventKey _win k _sc ks mk | ks == GLFW.KeyState'Pressed ->
@@ -85,12 +92,16 @@ instance Experiment RustNBodyExperiment where
                                      rnbTheta %= max 0.0 . min 0.95 . (\x -> x - 0.05)
                                | otherwise                 ->
                                      rnbTheta %= max 0.0 . min 0.95 . (\x -> x + 0.05)
+                    GLFW.Key'P | GLFW.modifierKeysShift mk ->
+                                     rnbNumThreads %= max 1 . min 16 . pred
+                               | otherwise                 ->
+                                     rnbNumThreads %= max 1 . min 16 . succ
                     _          -> return ()
             _ -> return ()
 
 foreign import ccall "nb_draw"             nbDraw            :: CInt -> CInt -> Ptr Word32 -> IO ()
 foreign import ccall "nb_step_brute_force" _nbStepBruteForce :: CFloat -> IO ()
-foreign import ccall "nb_step_barnes_hut"  nbStepBarnesHut   :: CFloat -> CFloat -> IO ()
+foreign import ccall "nb_step_barnes_hut"  nbStepBarnesHut   :: CFloat -> CFloat -> CInt -> IO ()
 foreign import ccall "nb_random_disk"      nbRandomDisk      :: CInt -> IO ()
 foreign import ccall "nb_stable_orbits"    nbStableOrbits    :: CInt -> CFloat -> CFloat -> IO ()
 foreign import ccall "nb_num_particles"    nbNumParticles    :: IO CInt

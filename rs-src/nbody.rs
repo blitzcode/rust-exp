@@ -128,18 +128,9 @@ pub extern fn nb_step_brute_force(dt : f32) -> () {
 
                 let b = &particles[j];
 
-                // Compute forces between particle pair
-                // https://en.wikipedia.org/wiki/Newton's_law_of_universal_gravitation#Vector_form
-
-                let dx = b.px - a.px;
-                let dy = b.py - a.py;
-                let dist = (dx * dx + dy * dy).sqrt();
-
-                let eps = 0.0001; // Softening factor, prevent singularities
-                let f = a.m * b.m / (dist * dist + eps);
-
-                mforces[i].fx += f * dx; // / dist;
-                mforces[i].fy += f * dy; // / dist;
+                let (fx_add, fy_add) = force(a.px, a.py, a.m, b.px, b.py, b.m);
+                mforces[i].fx += fx_add;
+                mforces[i].fy += fy_add;
             }
         }
 
@@ -161,6 +152,21 @@ pub extern fn nb_step_brute_force(dt : f32) -> () {
     }
 }
 
+fn force(px1: f32, py1: f32, m1: f32, px2: f32, py2: f32, m2: f32) -> (f32, f32) {
+    // Compute forces between particle pair
+    // https://en.wikipedia.org/wiki/Newton's_law_of_universal_gravitation#Vector_form
+
+    let dx = px2 - px1;
+    let dy = py2 - py1;
+    let dist = (dx * dx + dy * dy).sqrt();
+
+    let eps = 0.0001; // Softening factor, prevent singularities
+    let f = m1 * m2 / (dist * dist + eps);
+
+    // (f * dx / dist, f * dy / dist)
+    (f * dx, f * dy)
+}
+
 #[no_mangle]
 pub extern fn nb_step_barnes_hut(theta : f32, dt : f32) -> () {
     // Hierarchical O(n log n) simulation algorithm using the Barnes-Hut approximation algorithm
@@ -179,7 +185,7 @@ pub extern fn nb_step_barnes_hut(theta : f32, dt : f32) -> () {
         // Center of mass + total mass for interior nodes,
         // contained particle exterior ones
         px : f32, py : f32, m : f32,
-        // Child nodes
+        // Child nodes (TODO: Just store indices, half the storage, less scattered memory access)
         children: Option<[Box<Node>; 4]>
     }
     impl Node {
@@ -193,49 +199,45 @@ pub extern fn nb_step_barnes_hut(theta : f32, dt : f32) -> () {
 
         fn has_children(&self) -> bool { self.children.is_some() }
 
-        // TODO: This crashes when we infinitely recurse on bogus values, add some checks
-        fn insert(&mut self, px: f32, py: f32, m: f32) {
+        fn insert(&mut self, px: f32, py: f32, m: f32, depth : u32) {
+            if depth > 100 { panic!("Node::insert() - infinite recursion") }
             if self.has_children() {
                 // Interior node, accumulate mass and keep traversing
                 self.add_mass(px, py, m);
                 let quadrant = self.quadrant_from_point(px, py);
                 match self.children {
                     Some(ref mut children) => {
-                        children[quadrant as usize].insert(px, py, m);
+                        children[quadrant as usize].insert(px, py, m, depth + 1)
                     }
                     // TODO: We could avoid this awkward case if we just pattern matched
                     //       instead of using has_children() in the first place, but
                     //       convincing Rust's borrow checker to let us do this is
                     //       another matter
-                    None => { panic!("children missing") }
+                    None => { panic!("Node::insert() - children missing") }
                 }
             } else {
                 if self.m == 0.0 {
                     // No mass means empty exterior node, just insert particle here
-                    assert!(self.has_children() == false);
-                    assert!(m > 0.0);
-                    // TODO: FP inaccuracy makes self check fail later
-                    //self.add_mass(px, py, m); 
-                    self.px = px;
-                    self.py = py;
-                    self.m  = m;
+                    self.add_mass(px, py, m); 
                 } else {
-                    // Non-empty exterior node, first split and move particle to child
-                    self.insert_children();
+                    // Non-empty exterior node. Before we continue to insert we first need
+                    // to split it by clearing it, create its children and then
+                    // insert the original particle back
                     let px_original = self.px;
                     let py_original = self.py;
                     let m_original  = self.m;
                     self.px = 0.0;
                     self.py = 0.0;
                     self.m  = 0.0;
-                    self.insert(px_original, py_original, m_original);
-                    // Now keep traversing
-                    self.insert(px, py, m);
+                    self.create_children();
+                    self.insert(px_original, py_original, m_original, depth + 1);
+                    // Now keep inserting
+                    self.insert(px, py, m, depth + 1);
                 }
             }
         }
 
-        fn insert_children(&mut self) {
+        fn create_children(&mut self) {
             assert!(self.has_children() == false);
             let cx = (self.x1 + self.x2) * 0.5;
             let cy = (self.y1 + self.y2) * 0.5;
@@ -248,11 +250,21 @@ pub extern fn nb_step_barnes_hut(theta : f32, dt : f32) -> () {
         }
 
         fn add_mass(&mut self, px: f32, py: f32, m: f32) {
-            // Add particle mass, update center of gravity
-            let inv_msum = 1.0 / (self.m + m);
-            self.px = (self.px * self.m + px * m) * inv_msum;
-            self.py = (self.py * self.m + py * m) * inv_msum;
-            self.m += m;
+            assert!(m > 0.0);
+            if self.m == 0.0 {
+                // Special case for empty nodes. The whole center of gravity computation
+                // introduces small floating-point errors, making our 'i /= j' check based
+                // on particle positions fail during force computations
+                self.px = px;
+                self.py = py;
+                self.m  = m;
+            } else {
+                // Add particle mass, update center of gravity
+                let inv_msum = 1.0 / (self.m + m);
+                self.px = (self.px * self.m + px * m) * inv_msum;
+                self.py = (self.py * self.m + py * m) * inv_msum;
+                self.m += m;
+            }
         }
 
         fn quadrant_from_point(&self, x: f32, y: f32) -> Quadrant {
@@ -266,31 +278,26 @@ pub extern fn nb_step_barnes_hut(theta : f32, dt : f32) -> () {
             }
         }
 
-        fn compute_force(&self, px: f32, py: f32, m: f32) -> (f32, f32) {
+        fn compute_force(&self, px: f32, py: f32, m: f32, theta: f32) -> (f32, f32) {
             let mut fx = 0.0;
             let mut fy = 0.0;
             match self.children {
                 Some(ref children) => {
                     for child in children {
                         let (fx_add, fy_add) =
-                            child.compute_force(px, py, m);
+                            child.compute_force(px, py, m, theta);
                         fx += fx_add;
                         fy += fy_add;
                     }
                 }
                 None => {
-                    // Skip our own entry in the tree
+                    // Skip our own entry in the tree (i /= j)
                     if self.px == px && self.py == py { return (0.0, 0.0) }
 
-                    let dx = self.px - px;
-                    let dy = self.py - py;
-                    let dist = (dx * dx + dy * dy).sqrt();
-
-                    let eps = 0.0001;
-                    let f = m * self.m / (dist * dist + eps);
-
-                    fx = f * dx; // / dist;
-                    fy = f * dy; // / dist;
+                    let (fx_add, fy_add) = force(px, py, m, self.px, self.py, self.m);
+                    fx = fx_add;
+                    fy = fy_add;
+                }
             }
             (fx, fy)
         }
@@ -321,7 +328,7 @@ pub extern fn nb_step_barnes_hut(theta : f32, dt : f32) -> () {
 
         // Insert all particles into the tree
         for p in particles {
-            tree.insert(p.px, p.py, p.m);
+            tree.insert(p.px, p.py, p.m, 0);
         }
     }
 
@@ -331,11 +338,14 @@ pub extern fn nb_step_barnes_hut(theta : f32, dt : f32) -> () {
 
         // Compute forces using the quad tree
         for p in particles {
-            let (fx, fy) = tree.compute_force(p.px, p.py, p.m);
+            let (fx, fy) = tree.compute_force(p.px, p.py, p.m, theta);
 
-            // Update velocity and position
+            // Update velocity
+            // F = ma, a = F / m
             p.vx += dt * fx / p.m;
             p.vy += dt * fy / p.m;
+
+            // Update position
             p.px += dt * p.vx;
             p.py += dt * p.vy;
         }

@@ -279,21 +279,41 @@ pub extern fn nb_step_barnes_hut(theta : f32, dt : f32) -> () {
         }
 
         fn compute_force(&self, px: f32, py: f32, m: f32, theta: f32) -> (f32, f32) {
+            // Compute the forces acting on the specified particle. Use theta as a cutoff
+            // criteria for when to switch to single-particle approximations of sub trees
             let mut fx = 0.0;
             let mut fy = 0.0;
             match self.children {
                 Some(ref children) => {
-                    for child in children {
-                        let (fx_add, fy_add) =
-                            child.compute_force(px, py, m, theta);
-                        fx += fx_add;
-                        fy += fy_add;
+                    // Interior node, use approximation of sub tree or recurse?
+                    let s  = self.x2 - self.x1;
+                    let dx = self.px - px;
+                    let dy = self.py - py;
+                    let d  = (dx * dx + dy * dy).sqrt();
+                    if s / d < theta
+                    {
+                        // Approximate
+                        let (fx_add, fy_add) = force(px, py, m, self.px, self.py, self.m);
+                        fx = fx_add;
+                        fy = fy_add;
+                    } else {
+                        // Recurse
+                        for child in children {
+                            let (fx_add, fy_add) =
+                                child.compute_force(px, py, m, theta);
+                            fx += fx_add;
+                            fy += fy_add;
+                        }
                     }
                 }
                 None => {
                     // Skip our own entry in the tree (i /= j)
                     if self.px == px && self.py == py { return (0.0, 0.0) }
 
+                    // Skip empty exterior nodes
+                    if self.m == 0.0 { return (0.0, 0.0) }
+
+                    // Compute force with particle in this exterior node
                     let (fx_add, fy_add) = force(px, py, m, self.px, self.py, self.m);
                     fx = fx_add;
                     fy = fy_add;

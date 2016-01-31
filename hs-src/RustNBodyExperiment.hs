@@ -58,13 +58,13 @@ instance Experiment RustNBodyExperiment where
         RustNBodyExperiment { .. } <- get
         let avgtime = fromMaybe 1 . median . BS.toList $ _rnbTimes
         np <- liftIO (fromIntegral <$> nbNumParticles :: IO Int)
-        return $ printf ( "%i Steps, %.2fms, %i Steps/Second\n" ++
+        return $ printf ( "%i Steps, %.2fms, %.1f Steps/Second\n" ++
                          "%s Particles | [QWE] Setup Particles | " ++
                          "Time Step [T][t]: %.4f"
                         )
                         _rnbNumSteps
                         (avgtime * 1000)
-                        (round $ 1 / avgtime :: Int)
+                        (1 / avgtime)
                         ( if   np > 999
                           then show (np `div` 1000) ++ "K"
                           else show np
@@ -74,8 +74,8 @@ instance Experiment RustNBodyExperiment where
         case ev of
             GLFWEventKey _win k _sc ks mk | ks == GLFW.KeyState'Pressed ->
                 case k of
-                    GLFW.Key'Q -> liftIO $ nbStableOrbits 1000 0.5 30.0
-                    GLFW.Key'W -> liftIO $ nbRandomDisk   1000
+                    GLFW.Key'Q -> liftIO $ nbStableOrbits 20000 0.5 30.0
+                    GLFW.Key'W -> liftIO $ nbRandomDisk   20000
                     GLFW.Key'E -> liftIO $ nbStableOrbits 5 5.0 40.0
                     GLFW.Key'T | GLFW.modifierKeysShift mk -> rnbTimeStep //= 2
                                | otherwise                 -> rnbTimeStep  *= 2

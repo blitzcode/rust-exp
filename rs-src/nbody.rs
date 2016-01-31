@@ -90,7 +90,7 @@ pub extern fn nb_stable_orbits(num_particles: i32, rmin: f32, rmax: f32) -> () {
                                    py: r * theta.sin(),
                                    vx: -speed * theta.sin(),
                                    vy:  speed * theta.cos(),
-                                   m: planet_mass });
+                                   m : planet_mass });
     }
 }
 
@@ -154,6 +154,9 @@ pub extern fn nb_step_brute_force(dt : f32) -> () {
 
 fn force(px1: f32, py1: f32, m1: f32, px2: f32, py2: f32, m2: f32) -> (f32, f32) {
     // Compute forces between particle pair
+    //
+    // References:
+    //
     // https://en.wikipedia.org/wiki/Newton's_law_of_universal_gravitation#Vector_form
 
     let dx = px2 - px1;
@@ -218,7 +221,7 @@ pub extern fn nb_step_barnes_hut(theta : f32, dt : f32) -> () {
             } else {
                 if self.m == 0.0 {
                     // No mass means empty exterior node, just insert particle here
-                    self.add_mass(px, py, m); 
+                    self.add_mass(px, py, m);
                 } else {
                     // Non-empty exterior node. Before we continue to insert we first need
                     // to split it by clearing it, create its children and then
@@ -344,6 +347,9 @@ pub extern fn nb_step_barnes_hut(theta : f32, dt : f32) -> () {
         }
 
         // Root node
+        //
+        // TODO: Our quad tree is not necessarily quadratic, investigate whether
+        //       that's a good thing
         tree = Node::new(x1, y1, x2, y2);
 
         // Insert all particles into the tree
@@ -471,6 +477,9 @@ fn add_abgr32(c1 : u32, c2 : u32) -> u32 {
     //
     // TODO: In our case A is always 0 anyway, we could just add the components
     //       together and combine them without any of the shifts
+    //
+    // TODO: We could also just have an 8 bit buffer we use till copying to the
+    //       actual framebuffer
 
     let a1 = (c1 & 0xFF000000) >> 24;
     let b1 = (c1 & 0x00FF0000) >> 16;

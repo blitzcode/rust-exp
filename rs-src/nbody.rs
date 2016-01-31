@@ -161,10 +161,11 @@ fn force(px1: f32, py1: f32, m1: f32, px2: f32, py2: f32, m2: f32) -> (f32, f32)
 
     let dx = px2 - px1;
     let dy = py2 - py1;
-    let dist = (dx * dx + dy * dy).sqrt();
+    let dist_sq = dx * dx + dy * dy;
+    // let dist = dist_sq.sqrt();
 
     let eps = 0.0001; // Softening factor, prevent singularities
-    let f = m1 * m2 / (dist * dist + eps);
+    let f = m1 * m2 / (dist_sq + eps);
 
     // (f * dx / dist, f * dy / dist)
     (f * dx, f * dy)
@@ -300,10 +301,12 @@ pub extern fn nb_step_barnes_hut(theta : f32, dt : f32) -> () {
                         fx = fx_add;
                         fy = fy_add;
                     } else {
-                        // Recurse
-                        for child in children.into_iter() {
-                            let (fx_add, fy_add) =
-                                child.compute_force(px, py, m, theta);
+                        // Recurse. Unsafe indexing is slightly faster than
+                        // the obvious 'for child in children.into_iter() { ... }'
+                        for i in 0..4 {
+                            let (fx_add, fy_add) = unsafe {
+                                children.get_unchecked(i).compute_force(px, py, m, theta)
+                            };
                             fx += fx_add;
                             fy += fy_add;
                         }
@@ -346,10 +349,16 @@ pub extern fn nb_step_barnes_hut(theta : f32, dt : f32) -> () {
             y2 = if p.py > y2 { p.py } else { y2 };
         }
 
-        // Root node
-        //
         // TODO: Our quad tree is not necessarily quadratic, investigate whether
         //       that's a good thing
+        //
+        // if x2 - x1 > y2 - y1 {
+        //     y2 = y1 + (x2 - x1)
+        // } else {
+        //     x2 = x1 + (y2 - y1)
+        // }
+
+        // Root node
         tree = Node::new(x1, y1, x2, y2);
 
         // Insert all particles into the tree

@@ -38,7 +38,7 @@ data RustNBodyExperiment = RustNBodyExperiment
 makeLenses ''RustNBodyExperiment
 
 instance Experiment RustNBodyExperiment where
-    withExperiment f = do liftIO $ nbStableOrbits 1000 0.5 30.0
+    withExperiment f = do liftIO $ nbStableOrbits 10000 0.5 30.0
                           f $ RustNBodyExperiment { _rnbNumSteps = 0
                                                   , _rnbTimes    = BS.empty 30
                                                   , _rnbTimeStep = 0.01
@@ -47,7 +47,7 @@ instance Experiment RustNBodyExperiment where
     experimentDraw fb _tick = do
         dt <- use rnbTimeStep
         -- Simulate first
-        let theta = 0.5 :: Float
+        let theta = 0.85 :: Float
         time <- fst <$> liftIO (timeIt . nbStepBarnesHut (realToFrac theta) . realToFrac $ dt)
         void . liftIO . fillFrameBuffer fb $ \w h vec ->
             VSM.unsafeWith vec $ \pvec ->
@@ -74,8 +74,8 @@ instance Experiment RustNBodyExperiment where
         case ev of
             GLFWEventKey _win k _sc ks mk | ks == GLFW.KeyState'Pressed ->
                 case k of
-                    GLFW.Key'Q -> liftIO $ nbStableOrbits 20000 0.5 30.0
-                    GLFW.Key'W -> liftIO $ nbRandomDisk   20000
+                    GLFW.Key'Q -> liftIO $ nbStableOrbits 10000 0.5 30.0
+                    GLFW.Key'W -> liftIO $ nbRandomDisk   10000
                     GLFW.Key'E -> liftIO $ nbStableOrbits 5 5.0 40.0
                     GLFW.Key'T | GLFW.modifierKeysShift mk -> rnbTimeStep //= 2
                                | otherwise                 -> rnbTimeStep  *= 2

@@ -430,6 +430,9 @@ pub extern fn nb_draw(w: i32, h: i32, fb: *mut u32) -> () {
 
     let particles = PARTICLES.lock().unwrap();
 
+    let col_body = rgb_to_abgr32(255, 215, 130, 0.3);
+    let col_tail = rgb_to_abgr32(255, 215, 130, 0.2);
+
     for p in &(*particles) {
         // Translate from simulation to viewport coordinates
         let x = (p.px - x1) * scalex;
@@ -443,7 +446,7 @@ pub extern fn nb_draw(w: i32, h: i32, fb: *mut u32) -> () {
             if i == 0 {
                 xo = x as i32;
                 yo = y as i32;
-                col = 0x00404040;
+                col = col_body;
             } else {
                 // Tail
                 let len = 1.0 / (p.vx * p.vx + p.vy * p.vy).sqrt();
@@ -451,7 +454,7 @@ pub extern fn nb_draw(w: i32, h: i32, fb: *mut u32) -> () {
                 let vny = p.vy * len;
                 xo = (x + 0.3 - vnx) as i32;
                 yo = (y + 0.3 - vny) as i32;
-                col = 0x00303030;
+                col = col_tail;
             }
 
             // Bounds check
@@ -481,14 +484,20 @@ pub extern fn nb_draw(w: i32, h: i32, fb: *mut u32) -> () {
     }
 }
 
-fn add_abgr32(c1 : u32, c2 : u32) -> u32 {
+fn rgb_to_abgr32(r: u8, g: u8, b: u8, factor: f32) -> u32 {
+    let r = (r as f32 * factor) as u32;
+    let g = (g as f32 * factor) as u32;
+    let b = (b as f32 * factor) as u32;
+    (if r > 255 { 255 } else { r } << 0 ) |
+    (if b > 255 { 255 } else { b } << 16) |
+    (if g > 255 { 255 } else { g } << 8 )
+}
+
+fn add_abgr32(c1: u32, c2: u32) -> u32 {
     // Add two 32 bit ABGR values together
     //
     // TODO: In our case A is always 0 anyway, we could just add the components
     //       together and combine them without any of the shifts
-    //
-    // TODO: We could also just have an 8 bit buffer we use till copying to the
-    //       actual framebuffer
 
     let a1 = (c1 & 0xFF000000) >> 24;
     let b1 = (c1 & 0x00FF0000) >> 16;
@@ -505,6 +514,6 @@ fn add_abgr32(c1 : u32, c2 : u32) -> u32 {
     let br = min(255, b1 + b2);
     let rr = min(255, r1 + r2);
 
-    (ar << 24) | (gr << 16) | (br << 8) | (rr << 0)
+    (ar << 24) | (br << 16) | (gr << 8) | (rr << 0)
 }
 

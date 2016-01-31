@@ -60,13 +60,12 @@ instance Experiment RustNBodyExperiment where
         RustNBodyExperiment { .. } <- get
         let avgtime = fromMaybe 1 . median . BS.toList $ _rnbTimes
         np <- liftIO (fromIntegral <$> nbNumParticles :: IO Int)
-        return $ printf ( "%i Steps, %.2fms, %.1f Steps/Second\n" ++
-                         "%s P | [QWE] Scene | Time Step [T][t]: %.4f | " ++
-                         "Theta [A][a]: %.2f"
+        return $ printf ( "%i Steps, %.1fSPS/%.2fms | %s Bodies\n" ++
+                         "[QWE] Scene | Time Step [T][t]: %.4f | Theta [A][a]: %.2f"
                         )
                         _rnbNumSteps
-                        (avgtime * 1000)
                         (1 / avgtime)
+                        (avgtime * 1000)
                         ( if   np > 999
                           then show (np `div` 1000) ++ "K"
                           else show np

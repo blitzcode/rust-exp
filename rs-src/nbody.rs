@@ -159,6 +159,9 @@ fn force(px1: f32, py1: f32, m1: f32, px2: f32, py2: f32, m2: f32) -> (f32, f32)
     //
     // https://en.wikipedia.org/wiki/Newton's_law_of_universal_gravitation#Vector_form
 
+    // TODO: Why does this only work if the force direction vector is not
+    //       normalized, that seems wrong...
+
     let dx = px2 - px1;
     let dy = py2 - py1;
     let dist_sq = dx * dx + dy * dy;
@@ -173,7 +176,7 @@ fn force(px1: f32, py1: f32, m1: f32, px2: f32, py2: f32, m2: f32) -> (f32, f32)
 
 #[no_mangle]
 pub extern fn nb_step_barnes_hut(theta : f32, dt : f32) -> () {
-    // Hierarchical O(n log n) simulation algorithm using the Barnes-Hut approximation algorithm
+    // Hierarchical O(n log n) simulation using the Barnes-Hut approximation algorithm
     //
     // References:
     //
@@ -249,6 +252,7 @@ pub extern fn nb_step_barnes_hut(theta : f32, dt : f32) -> () {
         }
 
         fn create_children(&mut self) {
+            // Create the optional children in this node
             assert!(self.has_children() == false);
             let cx = (self.x1 + self.x2) * 0.5;
             let cy = (self.y1 + self.y2) * 0.5;
@@ -379,8 +383,12 @@ pub extern fn nb_step_barnes_hut(theta : f32, dt : f32) -> () {
         let particles = &mut (* particles_mtx);
 
         // Compute forces using the quad tree
+        //
+        // TODO: Parallelize this loop
         for p in particles {
             let (fx, fy) = tree.compute_force(p.px, p.py, p.m, theta);
+
+            // TODO: Try different integration scheme, Verlet / RK4 etc.
 
             // Update velocity
             // F = ma, a = F / m
@@ -437,6 +445,7 @@ pub extern fn nb_draw(w: i32, h: i32, fb: *mut u32) -> () {
 
     let particles = PARTICLES.lock().unwrap();
 
+    // Golden / yellow color
     let col_body = rgb_to_abgr32(255, 215, 130, 0.3);
     let col_tail = rgb_to_abgr32(255, 215, 130, 0.25);
 
@@ -501,6 +510,7 @@ pub extern fn nb_draw(w: i32, h: i32, fb: *mut u32) -> () {
 }
 
 fn rgb_to_abgr32(r: u8, g: u8, b: u8, factor: f32) -> u32 {
+    // Take a [0, 255] RGB triple and return a 32 bit ABGR value
     let r = (r as f32 * factor) as u32;
     let g = (g as f32 * factor) as u32;
     let b = (b as f32 * factor) as u32;

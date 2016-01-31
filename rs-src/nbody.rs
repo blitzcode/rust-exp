@@ -180,6 +180,13 @@ pub extern fn nb_step_barnes_hut(theta : f32, dt : f32) -> () {
     // https://en.wikipedia.org/wiki/Barnes%E2%80%93Hut_simulation
     // http://arborjs.org/docs/barnes-hut
 
+    // With a zero Theta we're forced to compute all N^2 interactions anyway, might
+    // as well not build the tree and just switch to the brute force algorithm
+    if theta == 0.0 {
+        nb_step_brute_force(dt);
+        return;
+    }
+
     // Quad tree
     #[derive(Copy, Clone)]
     enum Quadrant { UL, UR, LL, LR }

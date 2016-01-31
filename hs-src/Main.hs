@@ -22,6 +22,7 @@ import Experiment
 import RustSineExperiment
 import RustGoLExperiment
 import RustNBodyExperiment
+import RustRasterizerExperiment
 
 runOnAllCores :: IO ()
 runOnAllCores = GHC.Conc.getNumProcessors >>= setNumCapabilities
@@ -62,6 +63,7 @@ main = do
                     [ AnyWithExperiment (withExperiment :: WithExperiment RustSineExperiment )
                     , AnyWithExperiment (withExperiment :: WithExperiment RustGoLExperiment  )
                     , AnyWithExperiment (withExperiment :: WithExperiment RustNBodyExperiment)
+                    , AnyWithExperiment (withExperiment :: WithExperiment RustRasterizerExperiment)
                     ]
                 ae = AppEnv { .. }
                 as = AppState { _asLastEscPress   = -1

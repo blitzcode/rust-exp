@@ -431,7 +431,7 @@ pub extern fn nb_draw(w: i32, h: i32, fb: *mut u32) -> () {
     let particles = PARTICLES.lock().unwrap();
 
     let col_body = rgb_to_abgr32(255, 215, 130, 0.3);
-    let col_tail = rgb_to_abgr32(255, 215, 130, 0.2);
+    let col_tail = rgb_to_abgr32(255, 215, 130, 0.25);
 
     for p in &(*particles) {
         // Translate from simulation to viewport coordinates
@@ -449,11 +449,20 @@ pub extern fn nb_draw(w: i32, h: i32, fb: *mut u32) -> () {
                 col = col_body;
             } else {
                 // Tail
-                let len = 1.0 / (p.vx * p.vx + p.vy * p.vy).sqrt();
-                let vnx = p.vx * len;
-                let vny = p.vy * len;
-                xo = (x + 0.3 - vnx) as i32;
-                yo = (y + 0.3 - vny) as i32;
+                let angle = p.vy.atan2(p.vx);
+                let octant = ((8.0 * angle / (2.0 * consts::PI) + 8.0) as i32) % 8;
+                let dir : [(i32, i32); 8] = [
+                    ( 1,  0), // E
+                    ( 1,  1), // NE
+                    ( 0,  1), // N
+                    (-1,  1), // NW
+                    (-1,  0), // W
+                    (-1, -1), // SW
+                    ( 0, -1), // S
+                    ( 1, -1)  // SE
+                ];
+                xo = x as i32 - dir[octant as usize].0;
+                yo = y as i32 - dir[octant as usize].1;
                 col = col_tail;
             }
 

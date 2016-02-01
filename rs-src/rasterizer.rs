@@ -259,5 +259,28 @@ fn load_mesh(file_name: &String, mesh_file_type: MeshFileType) -> Mesh {
 pub extern fn rast_draw(tick: f64, w: i32, h: i32, fb: *mut u32) -> () {
     let cornell_mesh = CORNELL_MESH.lock().unwrap();
     let head_mesh = HEAD_MESH.lock().unwrap();
+
+    // Background gradient
+    // let start = Vec3::new(1.0, 0.4, 0.0);
+    // let end   = Vec3::new(0.0, 0.5, 0.5);
+    let start = Vec3::new(0.3, 0.3, 0.3);
+    let end   = Vec3::new(0.7, 0.7, 0.7);
+    for y in 0..h {
+        let pos   = y as f32 / (h - 1) as f32;
+        let col   = start * (1.0 - pos) + end * pos;
+        let col32 = rgbf_to_abgr32(col.x, col.y, col.z);
+        for x in 0..w {
+            unsafe {
+                * fb.offset((x + y * w) as isize) = col32;
+            }
+        }
+    }
+}
+
+fn rgbf_to_abgr32(r: f32, g: f32, b: f32) -> u32 {
+    let r8 = (clamp(r, 0.0, 1.0) * 255.0) as u32;
+    let g8 = (clamp(g, 0.0, 1.0) * 255.0) as u32;
+    let b8 = (clamp(b, 0.0, 1.0) * 255.0) as u32;
+    r8 | (g8 << 8) | (b8 << 16)
 }
 

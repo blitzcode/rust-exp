@@ -5,16 +5,17 @@ use std::path;
 use std::fs::File;
 use std::error::Error;
 use std::io::prelude::*;
+use std::f32;
 
 lazy_static! {
-    static ref CORNELL_MESH: Mutex<Vec<Triangle>> = {
+    static ref CORNELL_MESH: Mutex<Mesh> = {
         Mutex::new(
             load_mesh(&String::from("data/cornell_radiosity.dat"), MeshFileType::XyzRgbXx))
     };
 }
 
 lazy_static! {
-    static ref HEAD_MESH: Mutex<Vec<Triangle>> = {
+    static ref HEAD_MESH: Mutex<Mesh> = {
         Mutex::new(
             load_mesh(&String::from("data/head_ao.dat"), MeshFileType:: XyzNxnynzAoao))
     };
@@ -57,13 +58,39 @@ impl Triangle {
     }
 }
 
+struct Mesh {
+    tri:      Vec<Triangle>,
+    aabb_min: Vec3<f32>,
+    aabb_max: Vec3<f32>
+}
+
+impl Mesh {
+    fn new(tri: Vec<Triangle>) -> Mesh {
+        // Compute AABB
+        let mut aabb_min = Vec3::new(f32::MAX, f32::MAX, f32::MAX);
+        let mut aabb_max = Vec3::new(f32::MIN, f32::MIN, f32::MIN);
+        for t in &tri {
+            for v in &[t.v0.p, t.v1.p, t.v2.p] {
+                aabb_min.x = if aabb_min.x < v.x { aabb_min.x } else { v.x };
+                aabb_min.y = if aabb_min.y < v.y { aabb_min.y } else { v.y };
+                aabb_min.z = if aabb_min.z < v.z { aabb_min.z } else { v.z };
+                aabb_max.x = if aabb_max.x > v.x { aabb_max.x } else { v.x };
+                aabb_max.y = if aabb_max.y > v.y { aabb_max.y } else { v.y };
+                aabb_max.z = if aabb_max.z > v.z { aabb_max.z } else { v.z };
+            }
+        }
+
+        Mesh { tri: tri, aabb_min: aabb_min, aabb_max: aabb_max }
+    }
+}
+
 // We either have 'Px Py Pz ColR ColB ColG UVx UVy' with bogus UVs and radiosity data
 // in the color channel or 'Px Py Pz Nx Ny Nz UVx UVy' with ambient occlusion in both
 // texture coordinates
 #[derive(PartialEq)]
 enum MeshFileType { XyzRgbXx, XyzNxnynzAoao }
 
-fn load_mesh(file_name: &String, mesh_file_type: MeshFileType) -> Vec<Triangle> {
+fn load_mesh(file_name: &String, mesh_file_type: MeshFileType) -> Mesh {
     // Load a text format mesh from disk
 
     let path = path::Path::new(file_name);
@@ -202,7 +229,7 @@ fn load_mesh(file_name: &String, mesh_file_type: MeshFileType) -> Vec<Triangle> 
         }
     }
 
-    // Assemble triangle vector
+    // Assemble triangle vector and mesh
     let mut triangles = Vec::new();
     for tri_idx in idx {
         let mut ntri = Triangle::new(&vtx[tri_idx.0 as usize],
@@ -217,11 +244,15 @@ fn load_mesh(file_name: &String, mesh_file_type: MeshFileType) -> Vec<Triangle> 
         }
         triangles.push(ntri);
     }
+    let mesh = Mesh::new(triangles);
 
-    // println!("load_mesh(): Loaded {} tri and {} vtx from {}",
-    //     triangles.len(), vtx.len(), display);
+    // Print some mesh information
+    println!("load_mesh(): Loaded {} tri and {} vtx from {}, AABB ({}, {}, {}) - ({}, {}, {})",
+        mesh.tri.len(), vtx.len(), display,
+        mesh.aabb_min.x, mesh.aabb_min.y, mesh.aabb_min.z,
+        mesh.aabb_max.x, mesh.aabb_max.y, mesh.aabb_max.z);
 
-    triangles
+    mesh
 }
 
 #[no_mangle]

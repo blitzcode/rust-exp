@@ -40,7 +40,10 @@ instance Experiment RustRasterizerExperiment where
     experimentDraw fb tick = do
         mbtime <- liftIO . fillFrameBuffer fb $ \w h vec ->
             VSM.unsafeWith vec $ \pvec ->
-                fst <$> timeIt (rastDraw (realToFrac tick) (fromIntegral w) (fromIntegral h) pvec)
+                fst <$> timeIt (rastDraw (realToFrac tick)
+                                         (fromIntegral w)
+                                         (fromIntegral h)
+                                         pvec)
         case mbtime of
             Just time -> rrTimes %= BS.push_ time
             Nothing   -> return ()

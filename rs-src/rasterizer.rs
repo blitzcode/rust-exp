@@ -247,7 +247,7 @@ fn load_mesh(file_name: &String, mesh_file_type: MeshFileType) -> Mesh {
     let mesh = Mesh::new(triangles);
 
     // Print some mesh information
-    println!("load_mesh(): Loaded {} tri and {} vtx from {}, AABB ({}, {}, {}) - ({}, {}, {})",
+    println!("load_mesh(): Loaded {} Tri and {} Vtx from '{}', AABB ({}, {}, {}) - ({}, {}, {})",
         mesh.tri.len(), vtx.len(), display,
         mesh.aabb_min.x, mesh.aabb_min.y, mesh.aabb_min.z,
         mesh.aabb_max.x, mesh.aabb_max.y, mesh.aabb_max.z);
@@ -256,15 +256,17 @@ fn load_mesh(file_name: &String, mesh_file_type: MeshFileType) -> Mesh {
 }
 
 #[no_mangle]
-pub extern fn rast_draw(tick: f64, w: i32, h: i32, fb: *mut u32) -> () {
-    let cornell_mesh = CORNELL_MESH.lock().unwrap();
-    let head_mesh = HEAD_MESH.lock().unwrap();
-
+pub extern fn rast_draw(bg_type: i32, tick: f64, w: i32, h: i32, fb: *mut u32) -> () {
     // Background gradient
-    // let start = Vec3::new(1.0, 0.4, 0.0);
-    // let end   = Vec3::new(0.0, 0.5, 0.5);
-    let start = Vec3::new(0.3, 0.3, 0.3);
-    let end   = Vec3::new(0.7, 0.7, 0.7);
+    let start;
+    let end;
+    match bg_type % 5 {
+        0 => { start = Vec3::new(0.3, 0.3, 0.3); end = Vec3::new(0.7, 0.7, 0.7); } 
+        1 => { start = Vec3::new(1.0, 0.4, 0.0); end = Vec3::new(0.0, 0.5, 0.5); } 
+        2 => { start = Vec3::new(1.0, 0.0, 1.0); end = Vec3::new(1.0, 0.0, 1.0); }
+        3 => { start = Vec3::new(1.0, 1.0, 1.0); end = Vec3::new(1.0, 1.0, 1.0); } 
+        _ => { start = Vec3::new(0.0, 0.0, 0.0); end = Vec3::new(0.0, 0.0, 0.0); } 
+    }
     for y in 0..h {
         let pos   = y as f32 / (h - 1) as f32;
         let col   = start * (1.0 - pos) + end * pos;
@@ -275,6 +277,9 @@ pub extern fn rast_draw(tick: f64, w: i32, h: i32, fb: *mut u32) -> () {
             }
         }
     }
+
+    let cornell_mesh = CORNELL_MESH.lock().unwrap();
+    let head_mesh    = HEAD_MESH.lock().unwrap();
 }
 
 fn rgbf_to_abgr32(r: f32, g: f32, b: f32) -> u32 {

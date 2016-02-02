@@ -1,5 +1,4 @@
 
-use std::sync::Mutex;
 use na::{Vec3, Vec4, Pnt3, Mat3, Mat4, Iso3, PerspMat3, Rot3};
 use na::{Norm, Diag, Inv, Transpose, BaseFloat};
 use na;
@@ -10,16 +9,14 @@ use std::io::prelude::*;
 use std::f32;
 
 lazy_static! {
-    static ref CORNELL_MESH: Mutex<Mesh> = {
-        Mutex::new(
-            load_mesh(&String::from("data/cornell_radiosity.dat"), MeshFileType::XyzRgbXx))
+    static ref CORNELL_MESH: Mesh = {
+        load_mesh(&String::from("data/cornell_radiosity.dat"), MeshFileType::XyzRgbXx)
     };
 }
 
 lazy_static! {
-    static ref HEAD_MESH: Mutex<Mesh> = {
-        Mutex::new(
-            load_mesh(&String::from("data/head_ao.dat"), MeshFileType:: XyzNxnynzAoao))
+    static ref HEAD_MESH: Mesh = {
+        load_mesh(&String::from("data/head_ao.dat"), MeshFileType:: XyzNxnynzAoao)
     };
 }
 
@@ -370,48 +367,59 @@ pub extern fn rast_draw(mode: RenderMode,
     }
 
     // Scene mesh
-    let head_mesh    = HEAD_MESH.lock().unwrap();
-    let cornell_mesh = CORNELL_MESH.lock().unwrap();
-    let mesh = match scene {
-        Scene::Head       => head_mesh,
-        Scene::CornellBox => cornell_mesh,
+    let mesh: &Mesh = match scene {
+        Scene::Head       => &HEAD_MESH,
+        Scene::CornellBox => &CORNELL_MESH,
     };
 
-    // From mesh to screen
-    let world = mesh.normalize_dimensions();
-    let view  = na::to_homogeneous(
-                    &look_at(
-                        &match scene {
-                            Scene::Head => Pnt3::new(
-                                (tick.cos() * 2.0) as f32, 0.0, (tick.sin() * 2.0) as f32),
-                            Scene::CornellBox => Pnt3::new(
-                                (tick.cos() * 0.3) as f32, (tick.sin() * 0.3) as f32, 2.0),
-                        },
-                        &Pnt3::new(0.0, 0.0, 0.0),
-                        &Vec3::y()));
-    let proj  = *PerspMat3::new(
-                    w as f32 / h as f32,
-                    deg_to_rad(45.0),
-                    0.01,
-                    1000.0).as_mat() ;
-    let trans = proj * view * world;
+    // Build mesh to screen transformation
+    let world  = mesh.normalize_dimensions();
+    let view   = na::to_homogeneous(
+                     &look_at(
+                         &match scene {
+                             Scene::Head => Pnt3::new(
+                                 (tick.cos() * 2.0) as f32, 0.0, (tick.sin() * 2.0) as f32),
+                             Scene::CornellBox => Pnt3::new(
+                                 (tick.cos() * 0.3) as f32, (tick.sin() * 0.3) as f32, 2.0),
+                         },
+                         &Pnt3::new(0.0, 0.0, 0.0),
+                         &Vec3::y()));
+    let proj   = *PerspMat3::new(
+                     w as f32 / h as f32,
+                     deg_to_rad(45.0),
+                     0.01,
+                     1000.0).as_mat();
+    let wh     = w as f32 / 2.0;
+    let hh     = h as f32 / 2.0;
+    let screen = Mat4::new(wh,  0.0, 0.0, wh,
+                           0.0, hh,  0.0, hh,
+                           0.0, 0.0, 1.0, 0.0,
+                           0.0, 0.0, 0.0, 1.0);
+    let trans  = screen * proj * view * world;
 
     // Draw
-    for t in &mesh.tri {
-        for p in &[t.v0.p, t.v1.p, t.v2.p] {
-            let norm_homogeneous     = trans * na::to_homogeneous(p);
-            let norm_proj: Pnt3<f32> = na::from_homogeneous(&norm_homogeneous);
+    match mode {
+        RenderMode::Point => {
+            for t in &mesh.tri {
+                for p in &[t.v0.p, t.v1.p, t.v2.p] {
+                    let proj: Pnt3<f32> = na::from_homogeneous(&(trans * na::to_homogeneous(p)));
+                    let x               = proj.x as i32;
+                    let y               = proj.y as i32;
 
-            let x = ((1.0 + norm_proj.x) * w as f32 / 2.0) as i32;
-            let y = ((1.0 + norm_proj.y) * h as f32 / 2.0) as i32;
+                    if x < 0 || x >= w || y < 0 || y >= h { continue }
 
-            if x < 0 || x >= w || y < 0 || y >= h { continue }
-
-            let idx = x + y * w;
-
-            unsafe {
-                * fb.offset(idx as isize) = 0x00FFFFFF;
+                    let idx = x + y * w;
+                    unsafe {
+                        * fb.offset(idx as isize) = 0x00FFFFFF;
+                    }
+                }
             }
+        }
+
+        RenderMode::Line => {
+        }
+
+        RenderMode::Fill => {
         }
     }
 }

@@ -149,7 +149,7 @@ fn load_mesh(file_name: &String, mesh_file_type: MeshFileType) -> Mesh {
             Some(ln) => {
                 let words: Vec<&str> = ln.split(" ").collect();
                 if words[0] == "#" { continue } // Skip comments
-                // First non-empty, non-comment line should contain the vertex count 
+                // First non-empty, non-comment line should contain the vertex count
                 vtx_cnt = match words[0].parse::<u32>() {
                     Err(why) => panic!("load_mesh(): Can't parse vertex count: {}: {}",
                                        Error::description(&why),
@@ -215,7 +215,7 @@ fn load_mesh(file_name: &String, mesh_file_type: MeshFileType) -> Mesh {
         match lines.next() {
             Some("") => (), // Skip empty lines
             Some(ln) => {
-                // First non-empty, non-comment line should contain the index count 
+                // First non-empty, non-comment line should contain the index count
                 idx_cnt = match ln.parse::<u32>() {
                     Err(why) => panic!("load_mesh(): Can't parse index count: {}: {}",
                                        Error::description(&why),
@@ -334,11 +334,11 @@ pub extern fn rast_draw(mode: RenderMode,
     let start;
     let end;
     match bg_type % 5 {
-        0 => { start = Vec3::new(0.3, 0.3, 0.3); end = Vec3::new(0.7, 0.7, 0.7); } 
-        1 => { start = Vec3::new(1.0, 0.4, 0.0); end = Vec3::new(0.0, 0.5, 0.5); } 
+        0 => { start = Vec3::new(0.3, 0.3, 0.3); end = Vec3::new(0.7, 0.7, 0.7); }
+        1 => { start = Vec3::new(1.0, 0.4, 0.0); end = Vec3::new(0.0, 0.5, 0.5); }
         2 => { start = Vec3::new(1.0, 0.0, 1.0); end = Vec3::new(1.0, 0.0, 1.0); }
-        3 => { start = Vec3::new(1.0, 1.0, 1.0); end = Vec3::new(1.0, 1.0, 1.0); } 
-        _ => { start = Vec3::new(0.0, 0.0, 0.0); end = Vec3::new(0.0, 0.0, 0.0); } 
+        3 => { start = Vec3::new(1.0, 1.0, 1.0); end = Vec3::new(1.0, 1.0, 1.0); }
+        _ => { start = Vec3::new(0.0, 0.0, 0.0); end = Vec3::new(0.0, 0.0, 0.0); }
     }
     for y in 0..h {
         let pos   = y as f32 / (h - 1) as f32;

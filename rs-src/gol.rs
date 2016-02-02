@@ -18,7 +18,7 @@ lazy_static! {
 #[no_mangle]
 pub extern fn gol_randomize() -> () {
     let mut grid = GRID.lock().unwrap();
-    let mut rng = rand::thread_rng();
+    let mut rng  = rand::thread_rng();
 
     for y in 0..GRID_WDH {
         for x in 0..GRID_WDH {
@@ -31,7 +31,7 @@ pub extern fn gol_randomize() -> () {
 #[no_mangle]
 pub extern fn gol_step(nthreads : i32) -> () {
     // Allocate new grid without wasting time setting it to any value
-    let grid_size = (GRID_WDH * GRID_WDH) as usize;
+    let grid_size    = (GRID_WDH * GRID_WDH) as usize;
     let mut new_grid = Vec::with_capacity(grid_size);
     unsafe { new_grid.set_len(grid_size); }
     let new_grid_ptr = new_grid.as_mut_ptr();
@@ -58,13 +58,13 @@ pub extern fn gol_step(nthreads : i32) -> () {
             let torus_idx = |x: i32, y: i32| -> u8 {
                 let wrapx = if x < 0 { GRID_WDH - 1 } else { if x > GRID_WDH - 1 { 0 } else { x } };
                 let wrapy = if y < 0 { GRID_WDH - 1 } else { if y > GRID_WDH - 1 { 0 } else { y } };
-                let idx = wrapx + wrapy * GRID_WDH;
+                let idx   = wrapx + wrapy * GRID_WDH;
                 unsafe { * grid_ptr.offset(idx as isize) }
             };
 
             // 2D indexing, faster to wrap
-            let idx = (x + y * GRID_WDH) as isize;
-            let alive = unsafe { * grid_ptr.offset(idx as isize) };
+            let idx      = (x + y * GRID_WDH) as isize;
+            let alive    = unsafe { * grid_ptr.offset(idx as isize) };
             let alive_nb = torus_idx(x + 1, y    ) +
                            torus_idx(x    , y + 1) +
                            torus_idx(x - 1, y    ) +
@@ -117,8 +117,8 @@ pub extern fn gol_step(nthreads : i32) -> () {
 
         let threads: Vec<_> = (0..nthreads).map(|i| {
             // Vertical slice to be processed by the current thread
-            let range = (GRID_WDH - 2) / nthreads;
-            let seg_low = 1 + range * i;
+            let range    = (GRID_WDH - 2) / nthreads;
+            let seg_low  = 1 + range * i;
             let seg_high = if i == nthreads - 1 { GRID_WDH - 1 } else { 1 + range * (i + 1) };
 
             // Allow sharing of pointers with our threads
@@ -139,8 +139,8 @@ pub extern fn gol_step(nthreads : i32) -> () {
                 for y in seg_low..seg_high {
                     for x in 1..GRID_WDH - 1 {
                         // 1D indexing, no wrapping needed
-                        let idx = x + y * GRID_WDH;
-                        let alive = unsafe { * grid_ptr.offset(idx as isize) };
+                        let idx      = x + y * GRID_WDH;
+                        let alive    = unsafe { * grid_ptr.offset(idx as isize) };
                         let alive_nb = unsafe {
                             * grid_ptr.offset((idx + 1           ) as isize) +
                             * grid_ptr.offset((idx - 1           ) as isize) +
@@ -199,6 +199,7 @@ pub extern fn gol_draw(w: i32, h: i32, fb: *mut u32) -> () {
 
 #[no_mangle]
 pub extern fn gol_set_pattern(w: i32, h: i32, pat: *mut u8) -> () {
+    // Place specified pattern in the center of an empty grid
     let mut grid = GRID.lock().unwrap();
 
     // Clear grid

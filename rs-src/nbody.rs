@@ -270,7 +270,7 @@ pub extern fn nb_step_barnes_hut(theta : f32, dt : f32, nthreads: i32) -> () {
             assert!(m > 0.0);
             if self.m == 0.0 {
                 // Special case for empty nodes. The whole center of gravity computation
-                // introduces small floating-point errors, making our 'i /= j' check based
+                // introduces small floating-point errors, making our 'i != j' check based
                 // on particle positions fail during force computations
                 self.px = px;
                 self.py = py;
@@ -362,7 +362,7 @@ pub extern fn nb_step_barnes_hut(theta : f32, dt : f32, nthreads: i32) -> () {
             y2 = if p.py > y2 { p.py } else { y2 };
         }
 
-        // TODO: Our quad tree is not necessarily quadratic, investigate whether
+        // TODO: Our quad tree is not necessarily square, investigate whether
         //       that's a good thing
         //
         // if x2 - x1 > y2 - y1 {
@@ -388,10 +388,9 @@ pub extern fn nb_step_barnes_hut(theta : f32, dt : f32, nthreads: i32) -> () {
 
         let threads: Vec<_> = (0..nthreads).map(|i| {
             // Slice of particles to be processed by the current thread
-            let range = particles.len() as i32 / nthreads;
-            let seg_low = range * i;
-            let seg_high =
-                if i == nthreads - 1 { particles.len() as i32 } else { range * (i + 1) };
+            let range    = particles.len() as i32 / nthreads;
+            let seg_low  = range * i;
+            let seg_high = if i == nthreads - 1 { particles.len() as i32 } else { range * (i + 1) };
 
             // Allow sharing of particle pointer with our threads
             struct SendPtr {
@@ -435,7 +434,7 @@ pub extern fn nb_step_barnes_hut(theta : f32, dt : f32, nthreads: i32) -> () {
 #[no_mangle]
 pub extern fn nb_draw(w: i32, h: i32, fb: *mut u32) -> () {
     // If writing scattered points to write combined memory turns out to be a problem,
-    // enabled buffering
+    // enable buffering
     let buffer = false;
 
     if !buffer {
@@ -464,14 +463,13 @@ pub extern fn nb_draw(w: i32, h: i32, fb: *mut u32) -> () {
     let scaley = (1.0 / vph) * h as f32;
 
     // Optionally allocate buffer
-    let buf_ptr;
-    if buffer {
+    let buf_ptr = if buffer {
         let mut buf = Vec::new();
         buf.resize((w * h) as usize, 0u32);
-        buf_ptr = buf.as_mut_ptr();
+        buf.as_mut_ptr()
     } else {
-        buf_ptr = fb;
-    }
+        fb
+    };
 
     let particles = PARTICLES.lock().unwrap();
 

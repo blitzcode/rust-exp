@@ -1,6 +1,6 @@
 
 use std::sync::Mutex;
-use na::{Vec3, Vec4, Pnt3, Mat3, Mat4, Iso3};
+use na::{Vec2, Vec3, Vec4, Pnt3, Mat3, Mat4, Iso3, PerspMat3};
 use na::{Norm, Diag, Inv, Transpose};
 use na;
 use std::path;
@@ -349,6 +349,43 @@ pub extern fn rast_draw(bg_type: i32, tick: f64, w: i32, h: i32, fb: *mut u32) -
 
     let cornell_mesh = CORNELL_MESH.lock().unwrap();
     let head_mesh    = HEAD_MESH.lock().unwrap();
+
+    // From mesh to screen
+    let world = head_mesh.normalize_dimensions();
+    let view  = na::to_homogeneous(
+                    &Iso3::look_at_z(
+                        &Pnt3::new(0.0, 0.0, 2.0),
+                        &Pnt3::new(0.0, 0.0, 0.0),
+                        &Vec3::y()));
+    let proj  = *PerspMat3::new(
+                    w as f32 / h as f32,
+                    deg_to_rad(45.0),
+                    0.01,
+                    1000.0).as_mat();
+    let trans = proj * view * world;
+
+    for t in &head_mesh.tri {
+        for p in &[t.v0.p, t.v1.p, t.v2.p] {
+            let norm_homogeneous     = trans * na::to_homogeneous(p);
+            let norm_proj: Pnt3<f32> = na::from_homogeneous(&norm_homogeneous);
+
+            let x = ((1.0 + norm_proj.x) * w as f32 / 2.0) as i32;
+            let y = ((1.0 + norm_proj.y) * h as f32 / 2.0) as i32;
+
+            if x < 0 || x >= w || y < 0 || y >= h { continue }
+
+            let idx = x + y * w;
+
+            unsafe {
+                * fb.offset(idx as isize) = 0x00FFFFFF;
+            }
+        }
+    }
+}
+
+fn deg_to_rad(deg: f32) -> f32 {
+    // std::f32::to_radians() is still unstable
+    deg * 0.0174532925
 }
 
 fn rgbf_to_abgr32(r: f32, g: f32, b: f32) -> u32 {

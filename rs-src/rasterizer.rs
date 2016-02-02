@@ -1,7 +1,7 @@
 
 use std::sync::Mutex;
-use na::{Vec2, Vec3, Vec4, Pnt3, Mat3, Mat4, Iso3, PerspMat3, Rot3};
-use na::{Norm, Diag, Inv, Transpose, Cross};
+use na::{Vec3, Vec4, Pnt3, Mat3, Mat4, Iso3, PerspMat3, Rot3};
+use na::{Norm, Diag, Inv, Transpose, BaseFloat};
 use na;
 use std::path;
 use std::fs::File;
@@ -291,40 +291,18 @@ fn load_mesh(file_name: &String, mesh_file_type: MeshFileType) -> Mesh {
         }
         triangles.push(ntri);
     }
-    let mut mesh = Mesh::new(triangles);
-
-    // println!("");
+    let mesh = Mesh::new(triangles);
 
     // Print some mesh information
     println!("load_mesh(): Loaded {} Tri and {} Vtx from '{}', AABB ({}, {}, {}) - ({}, {}, {})",
         mesh.tri.len(), vtx.len(), display,
         mesh.aabb_min.x, mesh.aabb_min.y, mesh.aabb_min.z,
         mesh.aabb_max.x, mesh.aabb_max.y, mesh.aabb_max.z);
-
-    // let trans = mesh.normalize_dimensions();
-    // mesh.transform(&trans);
-
-    /*
-    println!("mat44 {:?}", trans);
-    println!("mat44 it {:?}", trans.inv().unwrap().transpose());
-    println!("mat33 it {:?}",
-             na::from_homogeneous::<Mat4<f32>, Mat3<f32>>(&trans.inv().unwrap().transpose()));
-    */
-
-    /*
-    // Print some mesh information
-    println!("load_mesh(): Loaded {} Tri and {} Vtx from '{}', AABB ({}, {}, {}) - ({}, {}, {})",
-        mesh.tri.len(), vtx.len(), display,
-        mesh.aabb_min.x, mesh.aabb_min.y, mesh.aabb_min.z,
-        mesh.aabb_max.x, mesh.aabb_max.y, mesh.aabb_max.z);
-    */
-
-    // println!("");
 
     mesh
 }
 
-fn look_at(eye: &Pnt3<f32>, at: &Pnt3<f32>, up: &Vec3<f32>) -> Iso3<f32> {
+fn look_at<N: BaseFloat>(eye: &Pnt3<N>, at: &Pnt3<N>, up: &Vec3<N>) -> Iso3<N> {
     // The Iso3::look_at_z() function form nalgebra seems broken, this works as expected
 
     let zaxis = na::normalize(&(*eye - *at));
@@ -344,8 +322,28 @@ fn look_at(eye: &Pnt3<f32>, at: &Pnt3<f32>, up: &Vec3<f32>) -> Iso3<f32> {
                                     na::dot(&zaxis, eye.as_vec())), rot)
 }
 
+fn deg_to_rad(deg: f32) -> f32 {
+    // std::f32::to_radians() is still unstable
+    deg * 0.0174532925
+}
+
+fn rgbf_to_abgr32(r: f32, g: f32, b: f32) -> u32 {
+    let r8 = (na::clamp(r, 0.0, 1.0) * 255.0) as u32;
+    let g8 = (na::clamp(g, 0.0, 1.0) * 255.0) as u32;
+    let b8 = (na::clamp(b, 0.0, 1.0) * 255.0) as u32;
+    r8 | (g8 << 8) | (b8 << 16)
+}
+
+#[repr(i32)]
+pub enum Scene { Head, CornellBox }
+
 #[no_mangle]
-pub extern fn rast_draw(bg_type: i32, tick: f64, w: i32, h: i32, fb: *mut u32) -> () {
+pub extern fn rast_draw(scene: Scene,
+                        bg_type: i32,
+                        tick: f64,
+                        w: i32,
+                        h: i32,
+                        fb: *mut u32) -> () {
     // Background gradient
     let start;
     let end;
@@ -367,122 +365,30 @@ pub extern fn rast_draw(bg_type: i32, tick: f64, w: i32, h: i32, fb: *mut u32) -
         }
     }
 
-    let cornell_mesh = CORNELL_MESH.lock().unwrap();
+    // Scene mesh
     let head_mesh    = HEAD_MESH.lock().unwrap();
+    let cornell_mesh = CORNELL_MESH.lock().unwrap();
+    let mesh = match scene {
+        Scene::Head       => head_mesh,
+        Scene::CornellBox => cornell_mesh,
+    };
 
     // From mesh to screen
-    let world = head_mesh.normalize_dimensions();
-
-    /*
-    void BuildLookAtMatrix(const Vector_t<T, 3>& eye,
-                           const Vector_t<T, 3>& look_at,
-                           const Vector_t<T, 3>& up = Vector_t<T, 3>(T(0.0), T(1.0), T(0.0)))
-    {
-        Matrix44_t mat_look_at_transf;
-        mat_look_at_transf.Identity();
-
-        // Z Axis points at the object
-        Vector_t<T, 3> zaxis = Normalize(eye - look_at);
-
-        // X Axis perpendicular to Up and Z
-        Vector_t<T, 3> xaxis = Normalize(up ^ zaxis);
-
-        // Y Axis perpendicular to Z and X
-        Vector_t<T, 3> yaxis = Normalize(zaxis ^ xaxis);
-
-        // Build basis
-        mat_look_at_transf.m_mat[0][0] = xaxis.x;
-        mat_look_at_transf.m_mat[0][1] = xaxis.y;
-        mat_look_at_transf.m_mat[0][2] = xaxis.z;
-        mat_look_at_transf.m_mat[1][0] = yaxis.x;
-        mat_look_at_transf.m_mat[1][1] = yaxis.y;
-        mat_look_at_transf.m_mat[1][2] = yaxis.z;
-        mat_look_at_transf.m_mat[2][0] = zaxis.x;
-        mat_look_at_transf.m_mat[2][1] = zaxis.y;
-        mat_look_at_transf.m_mat[2][2] = zaxis.z;
-
-        // Compute translation
-        Matrix44_t mat_trans;
-        mat_trans.Translation(
-            Dot(xaxis, eye),
-            Dot(yaxis, eye),
-            Dot(zaxis, eye));
-
-        // Combine translation + rotation
-        * this = mat_trans * mat_look_at_transf;
-    }
-    */
-
+    let world = mesh.normalize_dimensions();
     let view  = na::to_homogeneous(
-                    /*
-                    &Iso3::look_at_z(
-                        &Pnt3::new((tick.cos() * 2.0) as f32, 0.0, (tick.sin() * 2.0) as f32),
-                        &Pnt3::new(0.0, 0.0, 0.0),
-                        &Vec3::y())
-                    */
                     &look_at(
                         &Pnt3::new((tick.cos() * 2.0) as f32, 0.0, (tick.sin() * 2.0) as f32),
                         &Pnt3::new(0.0, 0.0, 0.0),
-                        &Vec3::y())
-
-                    // &Iso3::new(Vec3::new(0.0, 0.0, 2.0), na::zero())
-
-                    );
-
-/*
-    void BuildProjection(T fov, T aspect, T near, T far)
-    {
-        T f43, f11, f22;
-        T left, right, top, bottom;
-
-        bottom  = -(near * T(std::tan(DegToRad(fov / T(2.0)))));
-        left    = bottom;
-        bottom /= aspect;
-        top     = -bottom;
-        right   = -left;
-
-        f11 = -1.0f * near / (right - left);
-        f22 = -1.0f * near / (top - bottom);
-        f43 = 2.0f * far * near / (far - near);
-
-        Set(f11,    T(0.0), T(0.0),  T(0.0),
-            T(0.0), f22,    T(0.0),  T(0.0),
-            T(0.0), T(0.0), T(1.0),  f43,
-            T(0.0), T(0.0), T(-1.0), T(0.0));
-    }
-*/
-    /*
-    let aspect = w as f32 / h as f32;
-    let near = 0.01;
-    let far = 1000.0;
-    let mut bottom =  -(near * (deg_to_rad(45.0 / 2.0)).tan());
-    let left = bottom;
-    bottom = bottom / aspect;
-    let top = -bottom;
-    let right = -left;
-    let m11 = -1.0 * near / (right - left);
-    let m22 = -1.0 * near / (top - bottom);
-    let m43 = 2.0 * far * near / (far - near);
-    */
-    let proj  =
-                *PerspMat3::new(
+                        &Vec3::y()));
+    let proj  = *PerspMat3::new(
                     w as f32 / h as f32,
                     deg_to_rad(45.0),
                     0.01,
-                    1000.0).as_mat()
-
-                /*
-                Mat4::new(
-                    m11, 0.0,  0.0, 0.0,
-                    0.0, m22,  0.0, 0.0,
-                    0.0, 0.0,  1.0, m43,   
-                    0.0, 0.0, -1.0, 0.0
-                )
-                */
-                ;
+                    1000.0).as_mat() ;
     let trans = proj * view * world;
 
-    for t in &head_mesh.tri {
+    // Draw
+    for t in &mesh.tri {
         for p in &[t.v0.p, t.v1.p, t.v2.p] {
             let norm_homogeneous     = trans * na::to_homogeneous(p);
             let norm_proj: Pnt3<f32> = na::from_homogeneous(&norm_homogeneous);
@@ -499,17 +405,5 @@ pub extern fn rast_draw(bg_type: i32, tick: f64, w: i32, h: i32, fb: *mut u32) -
             }
         }
     }
-}
-
-fn deg_to_rad(deg: f32) -> f32 {
-    // std::f32::to_radians() is still unstable
-    deg * 0.0174532925
-}
-
-fn rgbf_to_abgr32(r: f32, g: f32, b: f32) -> u32 {
-    let r8 = (na::clamp(r, 0.0, 1.0) * 255.0) as u32;
-    let g8 = (na::clamp(g, 0.0, 1.0) * 255.0) as u32;
-    let b8 = (na::clamp(b, 0.0, 1.0) * 255.0) as u32;
-    r8 | (g8 << 8) | (b8 << 16)
 }
 

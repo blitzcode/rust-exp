@@ -24,12 +24,17 @@ import Timing
 import qualified BoundedSequence as BS
 import Median
 import GLFWHelpers
+import WrapEnum
 
 -- Software Rasterization
+
+data Scene = Head | CornellBox
+             deriving (Eq, Show, Enum, Bounded)
 
 data RustRasterizerExperiment = RustRasterizerExperiment
     { _rrTimes  :: !(BS.BoundedSequence Double)
     , _rrBgType :: !Int
+    , _rrScene  :: !Scene
     }
 
 makeLenses ''RustRasterizerExperiment
@@ -37,13 +42,16 @@ makeLenses ''RustRasterizerExperiment
 instance Experiment RustRasterizerExperiment where
     withExperiment f = do f $ RustRasterizerExperiment { _rrTimes  = BS.empty 30
                                                        , _rrBgType = 0
+                                                       , _rrScene  = Head
                                                        }
     experimentName _ = "RustRasterizer"
     experimentDraw fb tick = do
+        scene  <- use rrScene
         bgtype <- use rrBgType
         mbtime <- liftIO . fillFrameBuffer fb $ \w h vec ->
             VSM.unsafeWith vec $ \pvec ->
-                fst <$> timeIt (rastDraw (fromIntegral bgtype)
+                fst <$> timeIt (rastDraw (fromIntegral $ fromEnum scene)
+                                         (fromIntegral bgtype)
                                          (realToFrac tick)
                                          (fromIntegral w)
                                          (fromIntegral h)
@@ -54,16 +62,19 @@ instance Experiment RustRasterizerExperiment where
     experimentStatusString = do
         RustRasterizerExperiment { .. } <- get
         let avgtime = fromMaybe 1 . median . BS.toList $ _rrTimes
-        return $ printf "%.1fFPS/%.2fms | [B]grnd Type"
+        return $ printf "%.1fFPS/%.2fms | [B]grnd Type\nSc[e]ne: %s"
                         (1 / avgtime)
                         (avgtime * 1000)
+                        (show _rrScene)
     experimentGLFWEvent ev = do
         case ev of
             GLFWEventKey _win k _sc ks _mk | ks == GLFW.KeyState'Pressed ->
                 case k of
                     GLFW.Key'B -> rrBgType += 1
+                    GLFW.Key'E -> rrScene %= wrapSucc
                     _          -> return ()
             _ -> return ()
 
-foreign import ccall "rast_draw" rastDraw :: CInt -> CDouble -> CInt -> CInt -> Ptr Word32 -> IO ()
+foreign import ccall "rast_draw" rastDraw ::
+    CInt -> CInt -> CDouble -> CInt -> CInt -> Ptr Word32 -> IO ()
 

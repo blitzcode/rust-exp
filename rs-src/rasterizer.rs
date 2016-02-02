@@ -335,10 +335,14 @@ fn rgbf_to_abgr32(r: f32, g: f32, b: f32) -> u32 {
 }
 
 #[repr(i32)]
+pub enum RenderMode { Point, Line, Fill }
+
+#[repr(i32)]
 pub enum Scene { Head, CornellBox }
 
 #[no_mangle]
-pub extern fn rast_draw(scene: Scene,
+pub extern fn rast_draw(mode: RenderMode,
+                        scene: Scene,
                         bg_type: i32,
                         tick: f64,
                         w: i32,

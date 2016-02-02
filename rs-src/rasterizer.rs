@@ -413,6 +413,81 @@ pub extern fn rast_draw(mode: RenderMode,
         }
 
         RenderMode::Line => {
+            for t in &mesh.tri {
+                for &(idx1, idx2) in &[(t.v0, t.v1), (t.v1, t.v2), (t.v2, t.v0)] {
+                    // Edge coordinates
+                    let proj1  = &vtx_transf[idx1 as usize].p;
+                    let mut x1 = proj1.x as i32;
+                    let mut y1 = proj1.y as i32;
+                    let proj2  = &vtx_transf[idx2 as usize].p;
+                    let x2     = proj2.x as i32;
+                    let y2     = proj2.y as i32;
+
+                    let dx        = x2 - x1;
+                    let dy        = y2 - y1;
+                    let adx       = dx.abs();
+                    let ady       = dy.abs();
+                    let addx      = if dx < 0 { -1 } else { 1 };
+                    let addy      = if dy < 0 { -1 } else { 1 };
+                    let mut error = 0;
+                    let mut i     = 0;
+
+                    if adx > ady {
+                        while {
+                            error += ady;
+
+                            // Time to move up / down ?
+                            if error >= adx {
+                                error -= adx;
+                                y1 += addy;
+                            }
+
+                            i += 1;
+
+                            // Move horizontally
+                            x1 += addx;
+
+                            // Bounds check and draw
+                            if x1 >= 0 && x1 < w && y1 >= 0 && y1 < h {
+                                let idx = x1 + y1 * w;
+                                unsafe {
+                                    * fb.offset(idx as isize) = 0x00FFFFFF;
+                                }
+                            }
+
+                            // Repeat for x length of line
+                            i < adx
+                        } { }
+                    } else {
+                        while {
+                            error += adx;
+
+                            // Time to move left / right?
+                            if error >= ady {
+                                error -= ady;
+                                x1 += addx;
+                            }
+
+                            i += 1;
+
+                            // Move up / down a row
+                            y1 += addy;
+
+                            // Bounds check and draw
+                            if x1 >= 0 && x1 < w && y1 >= 0 && y1 < h {
+                                let idx = x1 + y1 * w;
+                                unsafe {
+                                    * fb.offset(idx as isize) = 0x00FFFFFF;
+                                }
+                            }
+
+                            // Repeat for y length of line
+                            i < ady
+                        }
+                        { }
+                    }
+                }
+            }
         }
 
         RenderMode::Fill => {

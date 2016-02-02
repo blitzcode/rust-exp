@@ -1,7 +1,7 @@
 
 use std::sync::Mutex;
-use na::{Vec2, Vec3, Vec4, Pnt3, Mat3, Mat4, Iso3, PerspMat3};
-use na::{Norm, Diag, Inv, Transpose};
+use na::{Vec2, Vec3, Vec4, Pnt3, Mat3, Mat4, Iso3, PerspMat3, Rot3};
+use na::{Norm, Diag, Inv, Transpose, Cross};
 use na;
 use std::path;
 use std::fs::File;
@@ -324,6 +324,26 @@ fn load_mesh(file_name: &String, mesh_file_type: MeshFileType) -> Mesh {
     mesh
 }
 
+fn look_at(eye: &Pnt3<f32>, at: &Pnt3<f32>, up: &Vec3<f32>) -> Iso3<f32> {
+    // The Iso3::look_at_z() function form nalgebra seems broken, this works as expected
+
+    let zaxis = na::normalize(&(*eye - *at));
+    let xaxis = na::normalize(&na::cross(up, &zaxis));
+    let yaxis = na::cross(&zaxis, &xaxis);
+
+    let rot = unsafe {
+        Rot3::new_with_mat(Mat3::new(
+            xaxis.x, yaxis.x, zaxis.x,
+            xaxis.y, yaxis.y, zaxis.y,
+            xaxis.z, yaxis.z, zaxis.z)
+        )
+    };
+
+    Iso3::new_with_rotmat(Vec3::new(na::dot(&xaxis, eye.as_vec()),
+                                    na::dot(&yaxis, eye.as_vec()),
+                                    na::dot(&zaxis, eye.as_vec())), rot)
+}
+
 #[no_mangle]
 pub extern fn rast_draw(bg_type: i32, tick: f64, w: i32, h: i32, fb: *mut u32) -> () {
     // Background gradient
@@ -352,16 +372,114 @@ pub extern fn rast_draw(bg_type: i32, tick: f64, w: i32, h: i32, fb: *mut u32) -
 
     // From mesh to screen
     let world = head_mesh.normalize_dimensions();
+
+    /*
+    void BuildLookAtMatrix(const Vector_t<T, 3>& eye,
+                           const Vector_t<T, 3>& look_at,
+                           const Vector_t<T, 3>& up = Vector_t<T, 3>(T(0.0), T(1.0), T(0.0)))
+    {
+        Matrix44_t mat_look_at_transf;
+        mat_look_at_transf.Identity();
+
+        // Z Axis points at the object
+        Vector_t<T, 3> zaxis = Normalize(eye - look_at);
+
+        // X Axis perpendicular to Up and Z
+        Vector_t<T, 3> xaxis = Normalize(up ^ zaxis);
+
+        // Y Axis perpendicular to Z and X
+        Vector_t<T, 3> yaxis = Normalize(zaxis ^ xaxis);
+
+        // Build basis
+        mat_look_at_transf.m_mat[0][0] = xaxis.x;
+        mat_look_at_transf.m_mat[0][1] = xaxis.y;
+        mat_look_at_transf.m_mat[0][2] = xaxis.z;
+        mat_look_at_transf.m_mat[1][0] = yaxis.x;
+        mat_look_at_transf.m_mat[1][1] = yaxis.y;
+        mat_look_at_transf.m_mat[1][2] = yaxis.z;
+        mat_look_at_transf.m_mat[2][0] = zaxis.x;
+        mat_look_at_transf.m_mat[2][1] = zaxis.y;
+        mat_look_at_transf.m_mat[2][2] = zaxis.z;
+
+        // Compute translation
+        Matrix44_t mat_trans;
+        mat_trans.Translation(
+            Dot(xaxis, eye),
+            Dot(yaxis, eye),
+            Dot(zaxis, eye));
+
+        // Combine translation + rotation
+        * this = mat_trans * mat_look_at_transf;
+    }
+    */
+
     let view  = na::to_homogeneous(
+                    /*
                     &Iso3::look_at_z(
-                        &Pnt3::new(0.0, 0.0, 2.0),
+                        &Pnt3::new((tick.cos() * 2.0) as f32, 0.0, (tick.sin() * 2.0) as f32),
                         &Pnt3::new(0.0, 0.0, 0.0),
-                        &Vec3::y()));
-    let proj  = *PerspMat3::new(
+                        &Vec3::y())
+                    */
+                    &look_at(
+                        &Pnt3::new((tick.cos() * 2.0) as f32, 0.0, (tick.sin() * 2.0) as f32),
+                        &Pnt3::new(0.0, 0.0, 0.0),
+                        &Vec3::y())
+
+                    // &Iso3::new(Vec3::new(0.0, 0.0, 2.0), na::zero())
+
+                    );
+
+/*
+    void BuildProjection(T fov, T aspect, T near, T far)
+    {
+        T f43, f11, f22;
+        T left, right, top, bottom;
+
+        bottom  = -(near * T(std::tan(DegToRad(fov / T(2.0)))));
+        left    = bottom;
+        bottom /= aspect;
+        top     = -bottom;
+        right   = -left;
+
+        f11 = -1.0f * near / (right - left);
+        f22 = -1.0f * near / (top - bottom);
+        f43 = 2.0f * far * near / (far - near);
+
+        Set(f11,    T(0.0), T(0.0),  T(0.0),
+            T(0.0), f22,    T(0.0),  T(0.0),
+            T(0.0), T(0.0), T(1.0),  f43,
+            T(0.0), T(0.0), T(-1.0), T(0.0));
+    }
+*/
+    /*
+    let aspect = w as f32 / h as f32;
+    let near = 0.01;
+    let far = 1000.0;
+    let mut bottom =  -(near * (deg_to_rad(45.0 / 2.0)).tan());
+    let left = bottom;
+    bottom = bottom / aspect;
+    let top = -bottom;
+    let right = -left;
+    let m11 = -1.0 * near / (right - left);
+    let m22 = -1.0 * near / (top - bottom);
+    let m43 = 2.0 * far * near / (far - near);
+    */
+    let proj  =
+                *PerspMat3::new(
                     w as f32 / h as f32,
                     deg_to_rad(45.0),
                     0.01,
-                    1000.0).as_mat();
+                    1000.0).as_mat()
+
+                /*
+                Mat4::new(
+                    m11, 0.0,  0.0, 0.0,
+                    0.0, m22,  0.0, 0.0,
+                    0.0, 0.0,  1.0, m43,   
+                    0.0, 0.0, -1.0, 0.0
+                )
+                */
+                ;
     let trans = proj * view * world;
 
     for t in &head_mesh.tri {

@@ -65,5 +65,5 @@ instance Experiment RustRasterizerExperiment where
                     _          -> return ()
             _ -> return ()
 
-foreign import ccall "rast_draw" rastDraw :: CInt -> CFloat -> CInt -> CInt -> Ptr Word32 -> IO ()
+foreign import ccall "rast_draw" rastDraw :: CInt -> CDouble -> CInt -> CInt -> Ptr Word32 -> IO ()
 

@@ -1,6 +1,8 @@
 
 use std::sync::Mutex;
-use nalgebra::*;
+use na::{Vec3, Vec4, Pnt3, Mat3, Mat4, Iso3};
+use na::{Norm, Diag, Inv, Transpose};
+use na;
 use std::path;
 use std::fs::File;
 use std::error::Error;
@@ -23,7 +25,7 @@ lazy_static! {
 
 #[derive(Clone, Copy)]
 struct Vertex {
-    p:   Vec3<f32>,
+    p:   Pnt3<f32>,
     n:   Vec3<f32>,
     col: Vec3<f32>
 }
@@ -33,7 +35,7 @@ impl Vertex {
            nx: f32, ny: f32, nz: f32,
            r:  f32, g:  f32, b:  f32) -> Vertex {
         Vertex {
-            p:   Vec3::new(px, py, pz),
+            p:   Pnt3::new(px, py, pz),
             n:   Vec3::new(nx, ny, nz),
             col: Vec3::new(r , g , b)
         }
@@ -54,7 +56,7 @@ impl Triangle {
     }
 
     fn face_normal(&self) -> Vec3<f32> {
-        (self.v1.p - self.v0.p).cross(&(self.v2.p - self.v0.p)).normalize()
+        na::cross(&(self.v1.p - self.v0.p), &(self.v2.p - self.v0.p)).normalize()
     }
 }
 
@@ -67,20 +69,65 @@ struct Mesh {
 impl Mesh {
     fn new(tri: Vec<Triangle>) -> Mesh {
         // Compute AABB
-        let mut aabb_min = Vec3::new(f32::MAX, f32::MAX, f32::MAX);
-        let mut aabb_max = Vec3::new(f32::MIN, f32::MIN, f32::MIN);
-        for t in &tri {
-            for v in &[t.v0.p, t.v1.p, t.v2.p] {
-                aabb_min.x = if aabb_min.x < v.x { aabb_min.x } else { v.x };
-                aabb_min.y = if aabb_min.y < v.y { aabb_min.y } else { v.y };
-                aabb_min.z = if aabb_min.z < v.z { aabb_min.z } else { v.z };
-                aabb_max.x = if aabb_max.x > v.x { aabb_max.x } else { v.x };
-                aabb_max.y = if aabb_max.y > v.y { aabb_max.y } else { v.y };
-                aabb_max.z = if aabb_max.z > v.z { aabb_max.z } else { v.z };
+        let mut mesh = Mesh { tri: tri, aabb_min: na::zero(), aabb_max: na::zero() };
+        mesh.update_aabb();
+        mesh
+    }
+
+    fn update_aabb(&mut self) {
+        self.aabb_min = Vec3::new(f32::MAX, f32::MAX, f32::MAX);
+        self.aabb_max = Vec3::new(f32::MIN, f32::MIN, f32::MIN);
+
+        for t in &self.tri {
+            for p in &[t.v0.p, t.v1.p, t.v2.p] {
+                self.aabb_min.x = if self.aabb_min.x < p.x { self.aabb_min.x } else { p.x };
+                self.aabb_min.y = if self.aabb_min.y < p.y { self.aabb_min.y } else { p.y };
+                self.aabb_min.z = if self.aabb_min.z < p.z { self.aabb_min.z } else { p.z };
+                self.aabb_max.x = if self.aabb_max.x > p.x { self.aabb_max.x } else { p.x };
+                self.aabb_max.y = if self.aabb_max.y > p.y { self.aabb_max.y } else { p.y };
+                self.aabb_max.z = if self.aabb_max.z > p.z { self.aabb_max.z } else { p.z };
             }
         }
+    }
 
-        Mesh { tri: tri, aabb_min: aabb_min, aabb_max: aabb_max }
+    fn normalize_dimensions(&self) -> Mat4<f32> {
+        // Build a matrix to transform the mesh to a unit cube with the origin as its center
+
+        // Translate to center
+        let center = (self.aabb_min + self.aabb_max) / 2.0;
+        let trans  = Iso3::new(-center, na::zero());
+
+        // Scale to unit cube
+        let extends = self.aabb_max - self.aabb_min;
+        let extends_max =
+            if extends.x > extends.y {
+                if extends.x > extends.z { extends.x } else { extends.z }
+            } else {
+                if extends.y > extends.z { extends.y } else { extends.z }
+            };
+        let extends_scale = 1.0 / extends_max;
+        let scale: Mat4<f32> =
+            Diag::from_diag(&Vec4::new(extends_scale, extends_scale, extends_scale, 1.0));
+
+        scale * na::to_homogeneous(&trans)
+    }
+
+    fn transform(&mut self, trans: &Mat4<f32>) {
+        let trans_it_33 =
+            na::from_homogeneous::<Mat4<f32>, Mat3<f32>>(&trans.inv().unwrap().transpose());
+
+        for t in &mut self.tri {
+            // Homogeneous transform for the vertices
+            t.v0.p = na::from_homogeneous(&(*trans * na::to_homogeneous(&t.v0.p)));
+            t.v1.p = na::from_homogeneous(&(*trans * na::to_homogeneous(&t.v1.p)));
+            t.v2.p = na::from_homogeneous(&(*trans * na::to_homogeneous(&t.v2.p)));
+
+            // Multiply with the 3x3 IT for normals
+            t.v0.n = (trans_it_33 * t.v0.n).normalize();
+            t.v1.n = (trans_it_33 * t.v1.n).normalize();
+            t.v2.n = (trans_it_33 * t.v2.n).normalize();
+        }
+        self.update_aabb();
     }
 }
 
@@ -93,7 +140,7 @@ enum MeshFileType { XyzRgbXx, XyzNxnynzAoao }
 fn load_mesh(file_name: &String, mesh_file_type: MeshFileType) -> Mesh {
     // Load a text format mesh from disk
 
-    let path = path::Path::new(file_name);
+    let path    = path::Path::new(file_name);
     let display = path.display();
 
     // Open mesh file
@@ -244,13 +291,35 @@ fn load_mesh(file_name: &String, mesh_file_type: MeshFileType) -> Mesh {
         }
         triangles.push(ntri);
     }
-    let mesh = Mesh::new(triangles);
+    let mut mesh = Mesh::new(triangles);
+
+    // println!("");
 
     // Print some mesh information
     println!("load_mesh(): Loaded {} Tri and {} Vtx from '{}', AABB ({}, {}, {}) - ({}, {}, {})",
         mesh.tri.len(), vtx.len(), display,
         mesh.aabb_min.x, mesh.aabb_min.y, mesh.aabb_min.z,
         mesh.aabb_max.x, mesh.aabb_max.y, mesh.aabb_max.z);
+
+    // let trans = mesh.normalize_dimensions();
+    // mesh.transform(&trans);
+
+    /*
+    println!("mat44 {:?}", trans);
+    println!("mat44 it {:?}", trans.inv().unwrap().transpose());
+    println!("mat33 it {:?}",
+             na::from_homogeneous::<Mat4<f32>, Mat3<f32>>(&trans.inv().unwrap().transpose()));
+    */
+
+    /*
+    // Print some mesh information
+    println!("load_mesh(): Loaded {} Tri and {} Vtx from '{}', AABB ({}, {}, {}) - ({}, {}, {})",
+        mesh.tri.len(), vtx.len(), display,
+        mesh.aabb_min.x, mesh.aabb_min.y, mesh.aabb_min.z,
+        mesh.aabb_max.x, mesh.aabb_max.y, mesh.aabb_max.z);
+    */
+
+    // println!("");
 
     mesh
 }
@@ -283,9 +352,9 @@ pub extern fn rast_draw(bg_type: i32, tick: f64, w: i32, h: i32, fb: *mut u32) -
 }
 
 fn rgbf_to_abgr32(r: f32, g: f32, b: f32) -> u32 {
-    let r8 = (clamp(r, 0.0, 1.0) * 255.0) as u32;
-    let g8 = (clamp(g, 0.0, 1.0) * 255.0) as u32;
-    let b8 = (clamp(b, 0.0, 1.0) * 255.0) as u32;
+    let r8 = (na::clamp(r, 0.0, 1.0) * 255.0) as u32;
+    let g8 = (na::clamp(g, 0.0, 1.0) * 255.0) as u32;
+    let b8 = (na::clamp(b, 0.0, 1.0) * 255.0) as u32;
     r8 | (g8 << 8) | (b8 << 16)
 }
 

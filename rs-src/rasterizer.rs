@@ -39,34 +39,31 @@ impl Vertex {
     }
 }
 
-// Fully inlined triangle representation
+// Indexed triangle representation
 #[derive(Clone, Copy)]
 struct Triangle {
-    v0: Vertex,
-    v1: Vertex,
-    v2: Vertex
+    v0: u32,
+    v1: u32,
+    v2: u32
 }
 
 impl Triangle {
-    fn new(v0: &Vertex, v1: &Vertex, v2: &Vertex) -> Triangle {
-        Triangle { v0: *v0, v1: *v1, v2: *v2 }
-    }
-
-    fn face_normal(&self) -> Vec3<f32> {
-        na::cross(&(self.v1.p - self.v0.p), &(self.v2.p - self.v0.p)).normalize()
+    fn new(v0: u32, v1: u32, v2: u32) -> Triangle {
+        Triangle { v0: v0, v1: v1, v2: v2 }
     }
 }
 
 struct Mesh {
     tri:      Vec<Triangle>,
+    vtx:      Vec<Vertex>,
     aabb_min: Vec3<f32>,
     aabb_max: Vec3<f32>
 }
 
 impl Mesh {
-    fn new(tri: Vec<Triangle>) -> Mesh {
+    fn new(tri: Vec<Triangle>, vtx: Vec<Vertex>) -> Mesh {
         // Compute AABB
-        let mut mesh = Mesh { tri: tri, aabb_min: na::zero(), aabb_max: na::zero() };
+        let mut mesh = Mesh { tri: tri, vtx: vtx, aabb_min: na::zero(), aabb_max: na::zero() };
         mesh.update_aabb();
         mesh
     }
@@ -75,15 +72,13 @@ impl Mesh {
         self.aabb_min = Vec3::new(f32::MAX, f32::MAX, f32::MAX);
         self.aabb_max = Vec3::new(f32::MIN, f32::MIN, f32::MIN);
 
-        for t in &self.tri {
-            for p in &[t.v0.p, t.v1.p, t.v2.p] {
-                self.aabb_min.x = if self.aabb_min.x < p.x { self.aabb_min.x } else { p.x };
-                self.aabb_min.y = if self.aabb_min.y < p.y { self.aabb_min.y } else { p.y };
-                self.aabb_min.z = if self.aabb_min.z < p.z { self.aabb_min.z } else { p.z };
-                self.aabb_max.x = if self.aabb_max.x > p.x { self.aabb_max.x } else { p.x };
-                self.aabb_max.y = if self.aabb_max.y > p.y { self.aabb_max.y } else { p.y };
-                self.aabb_max.z = if self.aabb_max.z > p.z { self.aabb_max.z } else { p.z };
-            }
+        for v in &self.vtx {
+            self.aabb_min.x = if self.aabb_min.x < v.p.x { self.aabb_min.x } else { v.p.x };
+            self.aabb_min.y = if self.aabb_min.y < v.p.y { self.aabb_min.y } else { v.p.y };
+            self.aabb_min.z = if self.aabb_min.z < v.p.z { self.aabb_min.z } else { v.p.z };
+            self.aabb_max.x = if self.aabb_max.x > v.p.x { self.aabb_max.x } else { v.p.x };
+            self.aabb_max.y = if self.aabb_max.y > v.p.y { self.aabb_max.y } else { v.p.y };
+            self.aabb_max.z = if self.aabb_max.z > v.p.z { self.aabb_max.z } else { v.p.z };
         }
     }
 
@@ -92,7 +87,7 @@ impl Mesh {
 
         // Translate to center
         let center = (self.aabb_min + self.aabb_max) / 2.0;
-        let trans  = Iso3::new(-center, na::zero());
+        let transf = Iso3::new(-center, na::zero());
 
         // Scale to unit cube
         let extends = self.aabb_max - self.aabb_min;
@@ -106,26 +101,12 @@ impl Mesh {
         let scale: Mat4<f32> =
             Diag::from_diag(&Vec4::new(extends_scale, extends_scale, extends_scale, 1.0));
 
-        scale * na::to_homogeneous(&trans)
+        scale * na::to_homogeneous(&transf)
     }
+}
 
-    fn transform(&mut self, trans: &Mat4<f32>) {
-        let trans_it_33 =
-            na::from_homogeneous::<Mat4<f32>, Mat3<f32>>(&trans.inv().unwrap().transpose());
-
-        for t in &mut self.tri {
-            // Homogeneous transform for the vertices
-            t.v0.p = na::from_homogeneous(&(*trans * na::to_homogeneous(&t.v0.p)));
-            t.v1.p = na::from_homogeneous(&(*trans * na::to_homogeneous(&t.v1.p)));
-            t.v2.p = na::from_homogeneous(&(*trans * na::to_homogeneous(&t.v2.p)));
-
-            // Multiply with the 3x3 IT for normals
-            t.v0.n = (trans_it_33 * t.v0.n).normalize();
-            t.v1.n = (trans_it_33 * t.v1.n).normalize();
-            t.v2.n = (trans_it_33 * t.v2.n).normalize();
-        }
-        self.update_aabb();
-    }
+fn face_normal(v0: &Pnt3<f32>, v1: &Pnt3<f32>,  v2: &Pnt3<f32>) -> Vec3<f32> {
+    na::cross(&(*v1 - *v0), &(*v2 - *v0)).normalize()
 }
 
 // We either have 'Px Py Pz ColR ColB ColG UVx UVy' with bogus UVs and radiosity data
@@ -263,7 +244,11 @@ fn load_mesh(file_name: &String, mesh_file_type: MeshFileType) -> Mesh {
                 }
                 let mut components: Vec<u32> = Vec::new();
                 for _ in 0..3 {
-                    components.push(words.next().unwrap().parse::<u32>().unwrap());
+                    let idx = words.next().unwrap().parse::<u32>().unwrap();
+                    if idx >= vtx_cnt {
+                        panic!("load_mesh(): Out-of-bounds index: {}: {}", idx, display)
+                    }
+                    components.push(idx);
                 }
                 idx.push((components[0], components[1], components[2]));
                 // Done?
@@ -274,25 +259,25 @@ fn load_mesh(file_name: &String, mesh_file_type: MeshFileType) -> Mesh {
     }
 
     // Assemble triangle vector and mesh
-    let mut triangles = Vec::new();
+    let mut tri = Vec::new();
     for tri_idx in idx {
-        let mut ntri = Triangle::new(&vtx[tri_idx.0 as usize],
-                                     &vtx[tri_idx.1 as usize],
-                                     &vtx[tri_idx.2 as usize]);
+        let ntri = Triangle::new(tri_idx.0, tri_idx.1, tri_idx.2);
         if mesh_file_type == MeshFileType::XyzRgbXx {
             // Set vertex normals from face normal
-            let n = ntri.face_normal();
-            ntri.v0.n = n;
-            ntri.v1.n = n;
-            ntri.v2.n = n;
+            let n = face_normal(&vtx[tri_idx.0 as usize].p,
+                                &vtx[tri_idx.1 as usize].p,
+                                &vtx[tri_idx.2 as usize].p);
+            vtx[tri_idx.0 as usize].n = n;
+            vtx[tri_idx.1 as usize].n = n;
+            vtx[tri_idx.2 as usize].n = n;
         }
-        triangles.push(ntri);
+        tri.push(ntri);
     }
-    let mesh = Mesh::new(triangles);
+    let mesh = Mesh::new(tri, vtx);
 
     // Print some mesh information
     println!("load_mesh(): Loaded {} Tri and {} Vtx from '{}', AABB ({}, {}, {}) - ({}, {}, {})",
-        mesh.tri.len(), vtx.len(), display,
+        mesh.tri.len(), mesh.vtx.len(), display,
         mesh.aabb_min.x, mesh.aabb_min.y, mesh.aabb_min.z,
         mesh.aabb_max.x, mesh.aabb_max.y, mesh.aabb_max.z);
 
@@ -373,38 +358,49 @@ pub extern fn rast_draw(mode: RenderMode,
     };
 
     // Build mesh to screen transformation
-    let world  = mesh.normalize_dimensions();
-    let view   = na::to_homogeneous(
-                     &look_at(
-                         &match scene {
-                             Scene::Head => Pnt3::new(
-                                 (tick.cos() * 2.0) as f32, 0.0, (tick.sin() * 2.0) as f32),
-                             Scene::CornellBox => Pnt3::new(
-                                 (tick.cos() * 0.3) as f32, (tick.sin() * 0.3) as f32, 2.0),
-                         },
-                         &Pnt3::new(0.0, 0.0, 0.0),
-                         &Vec3::y()));
-    let proj   = *PerspMat3::new(
-                     w as f32 / h as f32,
-                     deg_to_rad(45.0),
-                     0.01,
-                     1000.0).as_mat();
-    let wh     = w as f32 / 2.0;
-    let hh     = h as f32 / 2.0;
-    let screen = Mat4::new(wh,  0.0, 0.0, wh,
-                           0.0, hh,  0.0, hh,
-                           0.0, 0.0, 1.0, 0.0,
-                           0.0, 0.0, 0.0, 1.0);
-    let trans  = screen * proj * view * world;
+    let world        = mesh.normalize_dimensions();
+    let view         = na::to_homogeneous(
+                           &look_at(
+                               &match scene {
+                                   Scene::Head => Pnt3::new(
+                                       (tick.cos() * 2.0) as f32, 0.0, (tick.sin() * 2.0) as f32),
+                                   Scene::CornellBox => Pnt3::new(
+                                       (tick.cos() * 0.3) as f32, (tick.sin() * 0.3) as f32, 2.0),
+                               },
+                               &Pnt3::new(0.0, 0.0, 0.0),
+                               &Vec3::y()));
+    let proj         = *PerspMat3::new(
+                           w as f32 / h as f32,
+                           deg_to_rad(45.0),
+                           0.01,
+                           1000.0).as_mat();
+    let wh           = w as f32 / 2.0;
+    let hh           = h as f32 / 2.0;
+    let screen       = Mat4::new(wh,  0.0, 0.0, wh,
+                                 0.0, hh,  0.0, hh,
+                                 0.0, 0.0, 1.0, 0.0,
+                                 0.0, 0.0, 0.0, 1.0);
+    let transf       = screen * proj * view * world;
+    let transf_it_33 = na::from_homogeneous::<Mat4<f32>, Mat3<f32>>
+                          (&transf.inv().unwrap().transpose());
+
+    // Transform vertices
+    let mut vtx_transf = mesh.vtx.clone();
+    for v in &mut vtx_transf {
+        // Homogeneous transform for the positions
+        v.p = na::from_homogeneous(&(transf * na::to_homogeneous(&v.p)));
+        // Multiply with the 3x3 IT for normals
+        v.n = (transf_it_33 * v.n).normalize();
+    }
 
     // Draw
     match mode {
         RenderMode::Point => {
             for t in &mesh.tri {
-                for p in &[t.v0.p, t.v1.p, t.v2.p] {
-                    let proj: Pnt3<f32> = na::from_homogeneous(&(trans * na::to_homogeneous(p)));
-                    let x               = proj.x as i32;
-                    let y               = proj.y as i32;
+                for idx in &[t.v0, t.v1, t.v2] {
+                    let proj = &vtx_transf[*idx as usize].p;
+                    let x    = proj.x as i32;
+                    let y    = proj.y as i32;
 
                     if x < 0 || x >= w || y < 0 || y >= h { continue }
 

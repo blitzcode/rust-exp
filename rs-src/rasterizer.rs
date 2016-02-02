@@ -381,7 +381,12 @@ pub extern fn rast_draw(mode: RenderMode,
     let world = mesh.normalize_dimensions();
     let view  = na::to_homogeneous(
                     &look_at(
-                        &Pnt3::new((tick.cos() * 2.0) as f32, 0.0, (tick.sin() * 2.0) as f32),
+                        &match scene {
+                            Scene::Head => Pnt3::new(
+                                (tick.cos() * 2.0) as f32, 0.0, (tick.sin() * 2.0) as f32),
+                            Scene::CornellBox => Pnt3::new(
+                                (tick.cos() * 0.3) as f32, (tick.sin() * 0.3) as f32, 2.0),
+                        },
                         &Pnt3::new(0.0, 0.0, 0.0),
                         &Vec3::y()));
     let proj  = *PerspMat3::new(

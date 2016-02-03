@@ -316,6 +316,37 @@ fn rgbf_to_abgr32(r: f32, g: f32, b: f32) -> u32 {
     r8 | (g8 << 8) | (b8 << 16)
 }
 
+fn draw_line(x1: f32, y1: f32, x2: f32, y2: f32, fb: *mut u32, w: i32, h: i32) {
+    // Draw a line using the DDA algorithm. This is pretty poor code for various
+    // reasons, but just about good enough for debug drawing some wire frames
+
+    // Just so edges with same vertices but different winding get the same coordinates
+    let (x1, y1, x2, y2) = if x2 > x1 { (x1, y1, x2, y2) } else { (x2, y2, x1, y1) };
+
+    let dx    = x2 - x1;
+    let dy    = y2 - y1;
+    let s     = if dx.abs() > dy.abs() { dx.abs() } else { dy.abs() };
+    let xi    = dx / s;
+    let yi    = dy / s;
+    let mut x = x1;
+    let mut y = y1;
+    let mut m = 0.0;
+
+    while m < s {
+        let xr = x as i32;
+        let yr = y as i32;
+
+        if xr >= 0 && xr < w && yr >= 0 && yr < h {
+            let idx = xr + yr * w;
+            unsafe { * fb.offset(idx as isize) = 0x00FFFFFF }
+        }
+
+        x += xi;
+        y += yi;
+        m += 1.0;
+    }
+}
+
 #[repr(i32)]
 pub enum RenderMode { Point, Line, Fill }
 
@@ -403,19 +434,6 @@ pub extern fn rast_draw(mode: RenderMode,
     match mode {
         RenderMode::Point => {
             for t in &mesh.tri {
-
-                // Backface culling. We can compute the signed triangle area with a cross
-                // product, which in 2D boils down to the Z coordinate of the projected
-                // triangle. If it's pointing away from the camera, we can discard it
-                if false {
-                    let v0 = &vtx_transf[t.v0 as usize].p;
-                    let v1 = &vtx_transf[t.v1 as usize].p;
-                    let v2 = &vtx_transf[t.v2 as usize].p;
-                    let e1 = Vec2::new(v1.x - v0.x, v1.y - v0.y);
-                    let e2 = Vec2::new(v2.x - v0.x, v2.y - v0.y);
-                    if e1.x * e2.y - e1.y * e2.x <= 0.0 { continue }
-                }
-
                 for idx in &[t.v0, t.v1, t.v2] {
                     let proj = &vtx_transf[*idx as usize].p;
                     let x    = proj.x as i32;
@@ -433,78 +451,22 @@ pub extern fn rast_draw(mode: RenderMode,
 
         RenderMode::Line => {
             for t in &mesh.tri {
+                // Backface culling. We can compute the signed triangle area with a cross
+                // product, which in 2D boils down to the Z coordinate of the projected
+                // triangle. If it's pointing away from the camera, we can discard it
+                if false {
+                    let v0 = &vtx_transf[t.v0 as usize].p;
+                    let v1 = &vtx_transf[t.v1 as usize].p;
+                    let v2 = &vtx_transf[t.v2 as usize].p;
+                    let e1 = Vec2::new(v1.x - v0.x, v1.y - v0.y);
+                    let e2 = Vec2::new(v2.x - v0.x, v2.y - v0.y);
+                    if e1.x * e2.y - e1.y * e2.x <= 0.0 { continue }
+                }
                 for &(idx1, idx2) in &[(t.v0, t.v1), (t.v1, t.v2), (t.v2, t.v0)] {
-                    // Edge coordinates
-                    let proj1  = &vtx_transf[idx1 as usize].p;
-                    let mut x1 = proj1.x as i32;
-                    let mut y1 = proj1.y as i32;
-                    let proj2  = &vtx_transf[idx2 as usize].p;
-                    let x2     = proj2.x as i32;
-                    let y2     = proj2.y as i32;
+                    let proj1 = &vtx_transf[idx1 as usize].p;
+                    let proj2 = &vtx_transf[idx2 as usize].p;
 
-                    let dx        = x2 - x1;
-                    let dy        = y2 - y1;
-                    let adx       = dx.abs();
-                    let ady       = dy.abs();
-                    let addx      = if dx < 0 { -1 } else { 1 };
-                    let addy      = if dy < 0 { -1 } else { 1 };
-                    let mut error = 0;
-                    let mut i     = 0;
-
-                    if adx > ady {
-                        while {
-                            error += ady;
-
-                            // Time to move up / down ?
-                            if error >= adx {
-                                error -= adx;
-                                y1 += addy;
-                            }
-
-                            i += 1;
-
-                            // Move horizontally
-                            x1 += addx;
-
-                            // Bounds check and draw
-                            if x1 >= 0 && x1 < w && y1 >= 0 && y1 < h {
-                                let idx = x1 + y1 * w;
-                                unsafe {
-                                    * fb.offset(idx as isize) = 0x00FFFFFF;
-                                }
-                            }
-
-                            // Repeat for x length of line
-                            i < adx
-                        } { }
-                    } else {
-                        while {
-                            error += adx;
-
-                            // Time to move left / right?
-                            if error >= ady {
-                                error -= ady;
-                                x1 += addx;
-                            }
-
-                            i += 1;
-
-                            // Move up / down a row
-                            y1 += addy;
-
-                            // Bounds check and draw
-                            if x1 >= 0 && x1 < w && y1 >= 0 && y1 < h {
-                                let idx = x1 + y1 * w;
-                                unsafe {
-                                    * fb.offset(idx as isize) = 0x00FFFFFF;
-                                }
-                            }
-
-                            // Repeat for y length of line
-                            i < ady
-                        }
-                        { }
-                    }
+                    draw_line(proj1.x, proj1.y, proj2.x, proj2.y, fb, w, h);
                 }
             }
         }

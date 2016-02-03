@@ -384,13 +384,19 @@ pub extern fn rast_draw(mode: RenderMode,
     let transf_it_33 = na::from_homogeneous::<Mat4<f32>, Mat3<f32>>
                           (&transf.inv().unwrap().transpose());
 
-    // Transform vertices
-    let mut vtx_transf = mesh.vtx.clone();
-    for v in &mut vtx_transf {
+    // Transform vertices. Transform and copy into uninitialized vector instead
+    // of copy and transform in-place
+    let mut vtx_transf: Vec<Vertex> = Vec::with_capacity(mesh.vtx.len());
+    unsafe { vtx_transf.set_len(mesh.vtx.len()); }
+    for i in 0..mesh.vtx.len() {
+        let src = &mesh.vtx[i];
+        let dst = &mut vtx_transf[i];
         // Homogeneous transform for the positions
-        v.p = na::from_homogeneous(&(transf * na::to_homogeneous(&v.p)));
+        dst.p = na::from_homogeneous(&(transf * na::to_homogeneous(&src.p)));
         // Multiply with the 3x3 IT for normals
-        v.n = (transf_it_33 * v.n).normalize();
+        dst.n = (transf_it_33 * src.n).normalize();
+        // Copy color
+        dst.col = src.col;
     }
 
     // Draw

@@ -1,5 +1,5 @@
 
-use na::{Vec3, Vec4, Pnt3, Mat3, Mat4, Iso3, PerspMat3, Rot3};
+use na::{Vec2, Vec3, Vec4, Pnt3, Mat3, Mat4, Iso3, PerspMat3, Rot3};
 use na::{Norm, Diag, Inv, Transpose, BaseFloat};
 use na;
 use std::path;
@@ -403,6 +403,19 @@ pub extern fn rast_draw(mode: RenderMode,
     match mode {
         RenderMode::Point => {
             for t in &mesh.tri {
+
+                // Backface culling. We can compute the signed triangle area with a cross
+                // product, which in 2D boils down to the Z coordinate of the projected
+                // triangle. If it's pointing away from the camera, we can discard it
+                if false {
+                    let v0 = &vtx_transf[t.v0 as usize].p;
+                    let v1 = &vtx_transf[t.v1 as usize].p;
+                    let v2 = &vtx_transf[t.v2 as usize].p;
+                    let e1 = Vec2::new(v1.x - v0.x, v1.y - v0.y);
+                    let e2 = Vec2::new(v2.x - v0.x, v2.y - v0.y);
+                    if e1.x * e2.y - e1.y * e2.x <= 0.0 { continue }
+                }
+
                 for idx in &[t.v0, t.v1, t.v2] {
                     let proj = &vtx_transf[*idx as usize].p;
                     let x    = proj.x as i32;

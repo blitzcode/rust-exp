@@ -155,7 +155,7 @@ run env st =
     flip runReaderT env . flip evalStateT st $ do
         resize
         setVSync
-        experimentLoop 3
+        experimentLoop 2
   where -- Initialize / shutdown / switch experiment
         experimentLoop :: Int -> StateT AppState (ReaderT AppEnv IO) ()
         experimentLoop expIdx = do

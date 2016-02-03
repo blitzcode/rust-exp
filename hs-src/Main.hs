@@ -19,7 +19,7 @@ import FrameBuffer
 import QuadRendering
 import qualified BoundedSequence as BS
 import Experiment
-import RustSineExperiment
+import RustSineExperiment() -- Disabled, just for testing
 import RustGoLExperiment
 import RustNBodyExperiment
 import RustRasterizerExperiment
@@ -60,8 +60,7 @@ main = do
             traceSystemInfo
             _asCurTick <- getTick
             let _aeExperiments =
-                    [ AnyWithExperiment (withExperiment :: WithExperiment RustSineExperiment )
-                    , AnyWithExperiment (withExperiment :: WithExperiment RustGoLExperiment  )
+                    [ AnyWithExperiment (withExperiment :: WithExperiment RustGoLExperiment  )
                     , AnyWithExperiment (withExperiment :: WithExperiment RustNBodyExperiment)
                     , AnyWithExperiment (withExperiment :: WithExperiment RustRasterizerExperiment)
                     ]

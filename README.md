@@ -7,7 +7,6 @@ This project contains a number of experiments in the simulation / graphics categ
 
 Experiments include...
 
-- Simple 'scrolling sine waves' visualizer, proof-of-concept of the Rust -> Haskell -> OpenGL pipeline
 - The famous 'Game of Life' cellular automata, with a reasonably optimized and parallelized implementation plus recallable patterns
 - Gravitational N-Body simulation, both a brute force O(N^2) and the O(n log n) Barnes-Hut algorithm are implemented, parallelized
 

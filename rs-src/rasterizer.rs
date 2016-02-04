@@ -372,6 +372,12 @@ pub extern fn rast_draw(mode: RenderMode,
                         w: i32,
                         h: i32,
                         fb: *mut u32) -> () {
+    // Transform, rasterize and shade mesh
+    //
+    // References:
+    //
+    // https://fgiesen.wordpress.com/2011/07/09/a-trip-through-the-graphics-pipeline-2011-index/
+
     // Background gradient
     let start;
     let end;
@@ -472,6 +478,13 @@ pub extern fn rast_draw(mode: RenderMode,
         }
 
         RenderMode::Fill => {
+            // Rasterize with a fixed-point half-space algorithm
+            //
+            // References:
+            //
+            // http://forum.devmaster.net/t/advanced-rasterization/6145
+            // citeseerx.ist.psu.edu/viewdoc/download;'?doi=10.1.1.157.4621&rep=rep1&type=pdf
+
             for t in &mesh.tri {
                 // Triangle vertex position
                 let v0 = &vtx_transf[t.v0 as usize].p;
@@ -480,6 +493,8 @@ pub extern fn rast_draw(mode: RenderMode,
 
                 // Color
                 let v0_col = &vtx_transf[t.v0 as usize].col;
+                let v1_col = &vtx_transf[t.v1 as usize].col;
+                let v2_col = &vtx_transf[t.v2 as usize].col;
                 let col = rgbf_to_abgr32(v0_col.x, v0_col.y, v0_col.z);
 
                 // Convert to 28.4 fixed-point
@@ -490,11 +505,25 @@ pub extern fn rast_draw(mode: RenderMode,
                 let x2 = (v2.x * 16.0).round() as i32;
                 let y2 = (v2.y * 16.0).round() as i32;
 
+                // Implement top-left fill convention. Classifying those edges is simple,
+                // as with CCW vertex order they are either descending or horizontally
+                // moving right to left. We normally consider only raster positions as on
+                // the inside of an edge if the half-space function returns a positive
+                // value. For the top-left edges we want the contested raster positions
+                // lying on the edge to belong to its triangle. We basically want to turn
+                // the '> 0' comparison into '>= 0', and we do this by adding a constant 1
+                // for the half-space functions of those edges
                 let e0add = if (y1 - y0) < 0 || ((y1 - y0) == 0 && (x1 - x0) > 0) { 1 } else { 0 };
                 let e1add = if (y2 - y1) < 0 || ((y2 - y1) == 0 && (x2 - x1) > 0) { 1 } else { 0 };
                 let e2add = if (y0 - y2) < 0 || ((y0 - y2) == 0 && (x0 - x2) > 0) { 1 } else { 0 };
 
-                // AABB of the triangle
+                // AABB of the triangle. We can safely round up on the lower bound as
+                // there is no chance for coverage of the lower-left corner which we take
+                // as the pixel center. Round up on the upper
+                // bound as the loop over the AABB interprets the bounds as an open
+                // interval and could otherwise miss intersections. Note that we only need
+                // to round up and not do a +1 since our fill convention assigns those
+                // intersections on the
                 let min_x = (min3(x0, x1, x2) + 0xF) as i32 >> 4;
                 let min_y = (min3(y0, y1, y2) + 0xF) as i32 >> 4;
                 let max_x = (max3(x0, x1, x2) + 0xF) as i32 >> 4;
@@ -515,13 +544,18 @@ pub extern fn rast_draw(mode: RenderMode,
                         // raster position to the edge. The resulting vector will either
                         // point into or out of the screen, so we can check which side of
                         // the edge we're on by the sign of the Z component
-                        if (x1 - x0) * (yf - y0) - (y1 - y0) * (xf - x0) + e0add > 0 &&
-                           (x2 - x1) * (yf - y1) - (y2 - y1) * (xf - x1) + e1add > 0 &&
-                           (x0 - x2) * (yf - y2) - (y0 - y2) * (xf - x2) + e2add > 0 {
+                        let w0 = (x1 - x0) * (yf - y0) - (y1 - y0) * (xf - x0) + e0add;
+                        let w1 = (x2 - x1) * (yf - y1) - (y2 - y1) * (xf - x1) + e1add;
+                        let w2 = (x0 - x2) * (yf - y2) - (y0 - y2) * (xf - x2) + e2add;
+                        if w0 > 0 && w1 > 0 && w2 > 0 {
                             // Draw
+                            let cf = (
+                                *v0_col * w1 as f32 +
+                                *v1_col * w2 as f32 +
+                                *v2_col * w0 as f32) / (w0 + w1 + w2) as f32;
                             let idx = x + y * w;
                             unsafe {
-                                * fb.offset(idx as isize) = col;
+                                * fb.offset(idx as isize) = rgbf_to_abgr32(cf.x, cf.y, cf.z);
                             }
                         }
                     }

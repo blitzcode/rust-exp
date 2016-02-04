@@ -46,8 +46,8 @@ makeLenses ''RustRasterizerExperiment
 instance Experiment RustRasterizerExperiment where
     withExperiment f = do f $ RustRasterizerExperiment { _rrTimes  = BS.empty 30
                                                        , _rrBgType = 0
-                                                       , _rrScene  = Head
-                                                       , _rrMode   = Point
+                                                       , _rrScene  = CornellBox
+                                                       , _rrMode   = Fill
                                                        }
     experimentName _ = "RustRasterizer"
     experimentDraw fb tick = do

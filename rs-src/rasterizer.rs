@@ -1,5 +1,5 @@
 
-use na::{Vec2, Vec3, Vec4, Pnt3, Mat3, Mat4, Iso3, PerspMat3, Rot3};
+use na::{Vec3, Vec4, Pnt3, Mat3, Mat4, Iso3, PerspMat3, Rot3};
 use na::{Norm, Diag, Inv, Transpose, BaseFloat};
 use na;
 use std::path;
@@ -91,17 +91,28 @@ impl Mesh {
 
         // Scale to unit cube
         let extends = self.aabb_max - self.aabb_min;
-        let extends_max =
-            if extends.x > extends.y {
-                if extends.x > extends.z { extends.x } else { extends.z }
-            } else {
-                if extends.y > extends.z { extends.y } else { extends.z }
-            };
+        let extends_max = max3(extends.x, extends.y, extends.z);
         let extends_scale = 1.0 / extends_max;
         let scale: Mat4<f32> =
             Diag::from_diag(&Vec4::new(extends_scale, extends_scale, extends_scale, 1.0));
 
         scale * na::to_homogeneous(&transf)
+    }
+}
+
+fn max3(a: f32, b: f32, c: f32) -> f32 {
+    if a > b {
+        if a > c { a } else { c }
+    } else {
+        if b > c { b } else { c }
+    }
+}
+
+fn min3(a: f32, b: f32, c: f32) -> f32 {
+    if a < b {
+        if a < c { a } else { c }
+    } else {
+        if b < c { b } else { c }
     }
 }
 
@@ -451,17 +462,6 @@ pub extern fn rast_draw(mode: RenderMode,
 
         RenderMode::Line => {
             for t in &mesh.tri {
-                // Backface culling. We can compute the signed triangle area with a cross
-                // product, which in 2D boils down to the Z coordinate of the projected
-                // triangle. If it's pointing away from the camera, we can discard it
-                if false {
-                    let v0 = &vtx_transf[t.v0 as usize].p;
-                    let v1 = &vtx_transf[t.v1 as usize].p;
-                    let v2 = &vtx_transf[t.v2 as usize].p;
-                    let e1 = Vec2::new(v1.x - v0.x, v1.y - v0.y);
-                    let e2 = Vec2::new(v2.x - v0.x, v2.y - v0.y);
-                    if e1.x * e2.y - e1.y * e2.x <= 0.0 { continue }
-                }
                 for &(idx1, idx2) in &[(t.v0, t.v1), (t.v1, t.v2), (t.v2, t.v0)] {
                     let proj1 = &vtx_transf[idx1 as usize].p;
                     let proj2 = &vtx_transf[idx2 as usize].p;
@@ -472,6 +472,57 @@ pub extern fn rast_draw(mode: RenderMode,
         }
 
         RenderMode::Fill => {
+            for t in &mesh.tri {
+                let v0 = &vtx_transf[t.v0 as usize].p;
+                let v1 = &vtx_transf[t.v1 as usize].p;
+                let v2 = &vtx_transf[t.v2 as usize].p;
+
+                let v0_col = &vtx_transf[t.v0 as usize].col;
+                let col = rgbf_to_abgr32(v0_col.x, v0_col.y, v0_col.z);
+
+                let x0 = v0.x;
+                let y0 = v0.y;
+                let x1 = v1.x;
+                let y1 = v1.y;
+                let x2 = v2.x;
+                let y2 = v2.y;
+
+                /*
+                // Backface culling. We can compute the signed triangle area with a cross
+                // product, which in 2D boils down to the Z coordinate of the projected
+                // triangle. If it's pointing away from the camera, we can discard it
+                if false {
+                    let e1 = Vec2::new(v1.x - v0.x, v1.y - v0.y);
+                    let e2 = Vec2::new(v2.x - v0.x, v2.y - v0.y);
+                    if e1.x * e2.y - e1.y * e2.x <= 0.0 { continue }
+                }
+                */
+
+                let min_x = min3(x0, x1, x2) as i32;
+                let min_y = min3(y0, y1, y2) as i32;
+                let max_x = max3(x0, x1, x2) as i32;
+                let max_y = max3(y0, y1, y2) as i32;
+
+                for y in min_y..max_y + 1 {
+                    for x in min_x..max_x + 1 {
+                        if x < 0 || x >= w || y < 0 || y >= h { continue }
+
+                        let xf = x as f32;
+                        let yf = y as f32;
+
+                        if (x1 - x0) * (yf - y0) - (y1 - y0) * (xf - x0) > 0.0 &&
+                           (x2 - x1) * (yf - y1) - (y2 - y1) * (xf - x1) > 0.0 &&
+                           (x0 - x2) * (yf - y2) - (y0 - y2) * (xf - x2) > 0.0 {
+                            let idx = x + y * w;
+                            unsafe {
+                                * fb.offset(idx as isize) = col;
+                            }
+                        }
+                    }
+                }
+
+
+            }
         }
     }
 }

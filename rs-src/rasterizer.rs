@@ -100,7 +100,7 @@ impl Mesh {
     }
 }
 
-fn max3(a: f32, b: f32, c: f32) -> f32 {
+fn max3<T: PartialOrd>(a: T, b: T, c: T) -> T {
     if a > b {
         if a > c { a } else { c }
     } else {
@@ -108,7 +108,7 @@ fn max3(a: f32, b: f32, c: f32) -> f32 {
     }
 }
 
-fn min3(a: f32, b: f32, c: f32) -> f32 {
+fn min3<T: PartialOrd>(a: T, b: T, c: T) -> T {
     if a < b {
         if a < c { a } else { c }
     } else {
@@ -473,46 +473,52 @@ pub extern fn rast_draw(mode: RenderMode,
 
         RenderMode::Fill => {
             for t in &mesh.tri {
+                // Triangle vertex position
                 let v0 = &vtx_transf[t.v0 as usize].p;
                 let v1 = &vtx_transf[t.v1 as usize].p;
                 let v2 = &vtx_transf[t.v2 as usize].p;
 
+                // Color
                 let v0_col = &vtx_transf[t.v0 as usize].col;
                 let col = rgbf_to_abgr32(v0_col.x, v0_col.y, v0_col.z);
 
-                let x0 = v0.x;
-                let y0 = v0.y;
-                let x1 = v1.x;
-                let y1 = v1.y;
-                let x2 = v2.x;
-                let y2 = v2.y;
+                // Convert to 28.4 fixed-point
+                let x0 = (v0.x * 16.0).round() as i32;
+                let y0 = (v0.y * 16.0).round() as i32;
+                let x1 = (v1.x * 16.0).round() as i32;
+                let y1 = (v1.y * 16.0).round() as i32;
+                let x2 = (v2.x * 16.0).round() as i32;
+                let y2 = (v2.y * 16.0).round() as i32;
 
-                /*
-                // Backface culling. We can compute the signed triangle area with a cross
-                // product, which in 2D boils down to the Z coordinate of the projected
-                // triangle. If it's pointing away from the camera, we can discard it
-                if false {
-                    let e1 = Vec2::new(v1.x - v0.x, v1.y - v0.y);
-                    let e2 = Vec2::new(v2.x - v0.x, v2.y - v0.y);
-                    if e1.x * e2.y - e1.y * e2.x <= 0.0 { continue }
-                }
-                */
+                let e0add = if (y1 - y0) < 0 || ((y1 - y0) == 0 && (x1 - x0) > 0) { 1 } else { 0 };
+                let e1add = if (y2 - y1) < 0 || ((y2 - y1) == 0 && (x2 - x1) > 0) { 1 } else { 0 };
+                let e2add = if (y0 - y2) < 0 || ((y0 - y2) == 0 && (x0 - x2) > 0) { 1 } else { 0 };
 
-                let min_x = min3(x0, x1, x2) as i32;
-                let min_y = min3(y0, y1, y2) as i32;
-                let max_x = max3(x0, x1, x2) as i32;
-                let max_y = max3(y0, y1, y2) as i32;
+                // AABB of the triangle
+                let min_x = (min3(x0, x1, x2) + 0xF) as i32 >> 4;
+                let min_y = (min3(y0, y1, y2) + 0xF) as i32 >> 4;
+                let max_x = (max3(x0, x1, x2) + 0xF) as i32 >> 4;
+                let max_y = (max3(y0, y1, y2) + 0xF) as i32 >> 4;
 
-                for y in min_y..max_y + 1 {
-                    for x in min_x..max_x + 1 {
+                for y in min_y..max_y {
+                    for x in min_x..max_x {
+                        // Bounds check
                         if x < 0 || x >= w || y < 0 || y >= h { continue }
 
-                        let xf = x as f32;
-                        let yf = y as f32;
+                        // 28.4 coordinates of the current raster position
+                        let xf = x << 4;
+                        let yf = y << 4;
 
-                        if (x1 - x0) * (yf - y0) - (y1 - y0) * (xf - x0) > 0.0 &&
-                           (x2 - x1) * (yf - y1) - (y2 - y1) * (xf - x1) > 0.0 &&
-                           (x0 - x2) * (yf - y2) - (y0 - y2) * (xf - x2) > 0.0 {
+                        // Check the half-space functions for all three edges to see if
+                        // we're inside the triangle. These functions are basically just a
+                        // cross product between an edge and a vector from the current
+                        // raster position to the edge. The resulting vector will either
+                        // point into or out of the screen, so we can check which side of
+                        // the edge we're on by the sign of the Z component
+                        if (x1 - x0) * (yf - y0) - (y1 - y0) * (xf - x0) + e0add > 0 &&
+                           (x2 - x1) * (yf - y1) - (y2 - y1) * (xf - x1) + e1add > 0 &&
+                           (x0 - x2) * (yf - y2) - (y0 - y2) * (xf - x2) + e2add > 0 {
+                            // Draw
                             let idx = x + y * w;
                             unsafe {
                                 * fb.offset(idx as isize) = col;
@@ -520,8 +526,6 @@ pub extern fn rast_draw(mode: RenderMode,
                         }
                     }
                 }
-
-
             }
         }
     }

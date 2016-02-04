@@ -9,6 +9,11 @@ use std::cmp::min;
 use std::thread;
 use std::sync::Arc;
 
+// Specify viewport over simulation to be mapped to the framebuffer
+static VP_WDH:   f32 = 100.0;
+static VP_ORG_X: f32 = 0.0;
+static VP_ORG_Y: f32 = 0.0;
+
 static EPS: f32 = 0.0001;
 
 #[derive(Clone, Copy)]
@@ -261,7 +266,7 @@ pub extern fn nb_step_barnes_hut(theta : f32, dt : f32, nthreads: i32) -> () {
                     // handled by the 'too_close' check in the other branch
                     assert!(self.px != px || self.py != py);
 
-                    // Before we continue to insert we first need to split it by clearing
+                    // Before we continue to insert we first need to split the node by clearing
                     // it, create its children and then insert the original particle back
                     let px_original = self.px;
                     let py_original = self.py;
@@ -451,6 +456,19 @@ pub extern fn nb_step_barnes_hut(theta : f32, dt : f32, nthreads: i32) -> () {
                     // Update position
                     p.px += dt * p.vx;
                     p.py += dt * p.vy;
+
+                    // Sometimes a particle will speed away from the rest, likely due to
+                    // some instability caused by the Euler integrator at short distances.
+                    // This escaping particle will unfortunately enlarge our AABB, add
+                    // many more levels to the quad tree and cause a significant slowdown.
+                    // This hack here simply kills velocity for particles too far outside
+                    // the viewport, having them pulled back by gravity
+                    if (VP_ORG_X - p.px).abs() > VP_WDH * 0.55 ||
+                       (VP_ORG_Y - p.py).abs() > VP_WDH * 0.55
+                    {
+                        p.vx = 0.0;
+                        p.vy = 0.0;
+                    }
                 }
             })
         }).collect();
@@ -472,19 +490,14 @@ pub extern fn nb_draw(w: i32, h: i32, fb: *mut u32) -> () {
         unsafe { ptr::write_bytes(fb, 0, (w * h) as usize); }
     }
 
-    // Specify viewport over simulation to be mapped to the framebuffer
-    let vp_wdh   = 100.0;
-    let vp_org_x = 0.0;
-    let vp_org_y = 0.0;
-
     // Keep full width of the viewport visible, adjust height as needed
     let aspect = h as f32 / w as f32;
 
     // Framebuffer viewport in simulation dimensions
-    let x1 =  vp_org_x - vp_wdh / 2.0;
-    let y1 = (vp_org_y - vp_wdh / 2.0) * aspect;
-    let x2 =  vp_org_x + vp_wdh / 2.0;
-    let y2 = (vp_org_y + vp_wdh / 2.0) * aspect;
+    let x1 =  VP_ORG_X - VP_WDH / 2.0;
+    let y1 = (VP_ORG_Y - VP_WDH / 2.0) * aspect;
+    let x2 =  VP_ORG_X + VP_WDH / 2.0;
+    let y2 = (VP_ORG_Y + VP_WDH / 2.0) * aspect;
 
     // Scale factor for translating from simulation to framebuffer
     let vpw    = x2 - x1;

@@ -485,6 +485,9 @@ pub extern fn rast_draw(mode: RenderMode,
             // http://forum.devmaster.net/t/advanced-rasterization/6145
             // citeseerx.ist.psu.edu/viewdoc/download;'?doi=10.1.1.157.4621&rep=rep1&type=pdf
 
+            let mut depth: Vec<f32> = Vec::new();
+            depth.resize((w * h) as usize, 1.0);
+
             for t in &mesh.tri {
                 // Triangle vertex position
                 let v0 = &vtx_transf[t.v0 as usize].p;
@@ -549,11 +552,21 @@ pub extern fn rast_draw(mode: RenderMode,
                         let w2 = (x0 - x2) * (yf - y2) - (y0 - y2) * (xf - x2) + e2add;
                         if w0 > 0 && w1 > 0 && w2 > 0 {
                             // Draw
+                            let idx = x + y * w;
+
+                            let z = (
+                                v0.z * w1 as f32 +
+                                v1.z * w2 as f32 +
+                                v2.z * w0 as f32) / (w0 + w1 + w2) as f32;
+
+                            if z > depth[idx as usize] { continue }
+
+                            depth[idx as usize] = z;
+
                             let cf = (
                                 *v0_col * w1 as f32 +
                                 *v1_col * w2 as f32 +
                                 *v2_col * w0 as f32) / (w0 + w1 + w2) as f32;
-                            let idx = x + y * w;
                             unsafe {
                                 * fb.offset(idx as isize) = rgbf_to_abgr32(cf.x, cf.y, cf.z);
                             }

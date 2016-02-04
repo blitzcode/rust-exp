@@ -9,6 +9,8 @@ use std::cmp::min;
 use std::thread;
 use std::sync::Arc;
 
+static EPS: f32 = 0.0001;
+
 #[derive(Clone, Copy)]
 struct Particle {
     px : f32,
@@ -45,8 +47,8 @@ pub extern fn nb_random_disk(num_particles: i32) -> () {
         let mut x : f32 = u.ind_sample(&mut rng);
         let mut y : f32 = u.ind_sample(&mut rng);
         uniform_sample_disk(&mut x, &mut y);
-        x *= 20.0;
-        y *= 20.0;
+        x *= 23.0;
+        y *= 23.0;
 
         particles.push(Particle { px: x,
                                   py: y,
@@ -169,8 +171,8 @@ fn force(px1: f32, py1: f32, m1: f32, px2: f32, py2: f32, m2: f32) -> (f32, f32)
     let dist_sq = dx * dx + dy * dy;
     // let dist = dist_sq.sqrt();
 
-    let eps = 0.0001; // Softening factor, prevent singularities
-    let f = m1 * m2 / (dist_sq + eps);
+    // Use EPS as softening factor, prevent singularities
+    let f = m1 * m2 / (dist_sq + EPS);
 
     // (f * dx / dist, f * dy / dist)
     (f * dx, f * dy)
@@ -195,6 +197,7 @@ pub extern fn nb_step_barnes_hut(theta : f32, dt : f32, nthreads: i32) -> () {
     // Quad tree
     #[derive(Copy, Clone)]
     enum Quadrant { UL, UR, LL, LR }
+    #[derive(Debug)]
     struct Node {
         // AABB (TODO: Only need this at construction time, could just store width instead)
         x1 : f32, y1 : f32, x2 : f32, y2 : f32,
@@ -216,7 +219,13 @@ pub extern fn nb_step_barnes_hut(theta : f32, dt : f32, nthreads: i32) -> () {
         fn has_children(&self) -> bool { self.children.is_some() }
 
         fn insert(&mut self, px: f32, py: f32, m: f32, depth : u32) {
-            if depth > 100 { panic!("Node::insert() - infinite recursion") }
+            // Limit recursion level. At some depth floating-point precision is
+            // insufficient for further splitting, and we probably have a bug with
+            // particles that are very close or even have the same position
+            if depth > 50 {
+                panic!("Node::insert() - recursion px:{} py:{} m:{}, self:{:?}", px, py, m, self)
+            }
+
             if self.has_children() {
                 // Interior node, accumulate mass and keep traversing
                 self.add_mass(px, py, m);
@@ -232,13 +241,28 @@ pub extern fn nb_step_barnes_hut(theta : f32, dt : f32, nthreads: i32) -> () {
                     None => { panic!("Node::insert() - children missing") }
                 }
             } else {
-                if self.m == 0.0 {
-                    // No mass means empty exterior node, just insert particle here
+                let too_close = (self.px - px).abs() < EPS && (self.py - py).abs() < EPS;
+                if self.m == 0.0 || too_close {
+                    // No mass means empty exterior node, just insert particle here.
+                    // Alternatively, if our particles are closer than some epsilon we
+                    // just merge them into this node. Note that this stops the 'i != j'
+                    // check form working for both particles. The cleanest option would
+                    // probably be to merge particles with identical position and mass as
+                    // they'd never separate again and to push apart particles which are
+                    // too close. We could also consider having a list of particles in the
+                    // node or use the same epsilon for the 'i != j' check. This should
+                    // hopefully do for now, though
                     self.add_mass(px, py, m);
                 } else {
-                    // Non-empty exterior node. Before we continue to insert we first need
-                    // to split it by clearing it, create its children and then
-                    // insert the original particle back
+                    // Non-empty exterior node
+
+                    // Identical positions would cause infinite recursion as we can
+                    // never separate the two particles by splitting our nodes, should be
+                    // handled by the 'too_close' check in the other branch
+                    assert!(self.px != px || self.py != py);
+
+                    // Before we continue to insert we first need to split it by clearing
+                    // it, create its children and then insert the original particle back
                     let px_original = self.px;
                     let py_original = self.py;
                     let m_original  = self.m;
@@ -247,6 +271,7 @@ pub extern fn nb_step_barnes_hut(theta : f32, dt : f32, nthreads: i32) -> () {
                     self.m  = 0.0;
                     self.create_children();
                     self.insert(px_original, py_original, m_original, depth + 1);
+
                     // Now keep inserting
                     self.insert(px, py, m, depth + 1);
                 }
@@ -258,6 +283,10 @@ pub extern fn nb_step_barnes_hut(theta : f32, dt : f32, nthreads: i32) -> () {
             assert!(self.has_children() == false);
             let cx = (self.x1 + self.x2) * 0.5;
             let cy = (self.y1 + self.y2) * 0.5;
+
+            // Floating-point precision is quickly insufficient for further subdivision
+            assert!(cx > self.x1 || cx < self.x2 || cy > self.y1 || cy < self.y2);
+
             self.children = Some(Box::new([
                 Node::new(self.x1, cy     , cx     , self.y2), // UL
                 Node::new(cx     , cy     , self.x2, self.y2), // UR
@@ -277,6 +306,7 @@ pub extern fn nb_step_barnes_hut(theta : f32, dt : f32, nthreads: i32) -> () {
                 self.m  = m;
             } else {
                 // Add particle mass, update center of gravity
+                // TODO: Interpolation errors can push center outside of node AABB, clip?
                 let inv_msum = 1.0 / (self.m + m);
                 self.px = (self.px * self.m + px * m) * inv_msum;
                 self.py = (self.py * self.m + py * m) * inv_msum;

@@ -1,5 +1,5 @@
 
-use na::{Vec3, Vec4, Pnt3, Mat3, Mat4, Iso3, PerspMat3, Rot3};
+use na::{Vec3, Vec4, Pnt3, Pnt4, Mat3, Mat4, Iso3, PerspMat3, Rot3};
 use na::{Norm, Diag, Inv, Transpose, BaseFloat};
 use na;
 use std::path;
@@ -26,9 +26,15 @@ lazy_static! {
     };
 }
 
+lazy_static! {
+    static ref CUBE_MESH: Mesh = {
+        load_mesh(&String::from("data/cube.dat"), MeshFileType:: XyzRgbXx)
+    };
+}
+
 #[derive(Clone, Copy)]
 struct Vertex {
-    p:   Pnt3<f32>,
+    p:   Pnt4<f32>,
     n:   Vec3<f32>,
     col: Vec3<f32>
 }
@@ -38,7 +44,7 @@ impl Vertex {
            nx: f32, ny: f32, nz: f32,
            r:  f32, g:  f32, b:  f32) -> Vertex {
         Vertex {
-            p:   Pnt3::new(px, py, pz),
+            p:   Pnt4::new(px, py, pz, 1.0),
             n:   Vec3::new(nx, ny, nz),
             col: Vec3::new(r , g , b)
         }
@@ -281,12 +287,14 @@ fn load_mesh(file_name: &String, mesh_file_type: MeshFileType) -> Mesh {
         let ntri = Triangle::new(tri_idx.0, tri_idx.1, tri_idx.2);
         if mesh_file_type == MeshFileType::XyzRgbXx {
             // Set vertex normals from face normal
+            /* TODO
             let n = face_normal(&vtx[tri_idx.0 as usize].p,
                                 &vtx[tri_idx.1 as usize].p,
                                 &vtx[tri_idx.2 as usize].p);
             vtx[tri_idx.0 as usize].n = n;
             vtx[tri_idx.1 as usize].n = n;
             vtx[tri_idx.2 as usize].n = n;
+            TODO */
         }
         tri.push(ntri);
     }
@@ -368,7 +376,7 @@ fn draw_line(x1: f32, y1: f32, x2: f32, y2: f32, fb: *mut u32, w: i32, h: i32) {
 pub enum RenderMode { Point, Line, Fill }
 
 #[repr(i32)]
-pub enum Scene { Head, CornellBox, TorusKnot }
+pub enum Scene { Head, CornellBox, TorusKnot, Cube }
 
 #[no_mangle]
 pub extern fn rast_draw(mode: RenderMode,
@@ -405,7 +413,8 @@ pub extern fn rast_draw(mode: RenderMode,
     let mesh: &Mesh = match scene {
         Scene::Head       => &HEAD_MESH,
         Scene::CornellBox => &CORNELL_MESH,
-        Scene::TorusKnot  => &TORUS_KNOT_MESH
+        Scene::TorusKnot  => &TORUS_KNOT_MESH,
+        Scene::Cube       => &CUBE_MESH
     };
 
     // Build mesh to screen transformation
@@ -413,7 +422,7 @@ pub extern fn rast_draw(mode: RenderMode,
     let view         = na::to_homogeneous(
                            &look_at(
                                &match scene {
-                                   Scene::Head | Scene::TorusKnot => Pnt3::new(
+                                   Scene::Head | Scene::TorusKnot | Scene::Cube => Pnt3::new(
                                        (tick.cos() * 2.0) as f32, 0.0, (tick.sin() * 2.0) as f32),
                                    Scene::CornellBox => Pnt3::new(
                                        (tick.cos() * 0.3) as f32, (tick.sin() * 0.3) as f32, 2.0),
@@ -443,7 +452,11 @@ pub extern fn rast_draw(mode: RenderMode,
         let src = &mesh.vtx[i];
         let dst = &mut vtx_transf[i];
         // Homogeneous transform for the positions
-        dst.p = na::from_homogeneous(&(transf * na::to_homogeneous(&src.p)));
+        //dst.p = na::from_homogeneous(&(transf * na::to_homogeneous(&src.p)));
+        dst.p = transf * src.p;
+        dst.p.x /= dst.p.w;
+        dst.p.y /= dst.p.w;
+        dst.p.z /= dst.p.w;
         // Multiply with the 3x3 IT for normals
         dst.n = (transf_it_33 * src.n).normalize();
         // Copy color
@@ -489,16 +502,15 @@ pub extern fn rast_draw(mode: RenderMode,
             let depth_ptr = depth.as_mut_ptr();
 
             for t in &mesh.tri {
-                // Triangle vertex position
-                let v0 = &vtx_transf[t.v0 as usize].p;
-                let v1 = &vtx_transf[t.v1 as usize].p;
-                let v2 = &vtx_transf[t.v2 as usize].p;
+                // Triangle vertices
+                let vtx0 = &vtx_transf[t.v0 as usize];
+                let vtx1 = &vtx_transf[t.v1 as usize];
+                let vtx2 = &vtx_transf[t.v2 as usize];
 
-                // Color
-                let v0_col = &vtx_transf[t.v0 as usize].col;
-                let v1_col = &vtx_transf[t.v1 as usize].col;
-                let v2_col = &vtx_transf[t.v2 as usize].col;
-                let col = rgbf_to_abgr32(v0_col.x, v0_col.y, v0_col.z);
+                // Break out positions, colors and normals
+                let v0 = &vtx0.p; let c0 = &vtx0.col; let n0 = &vtx0.n;
+                let v1 = &vtx1.p; let c1 = &vtx1.col; let n1 = &vtx1.n;
+                let v2 = &vtx2.p; let c2 = &vtx2.col; let n2 = &vtx2.n;
 
                 // Convert to 28.4 fixed-point
                 let x0 = (v0.x * 16.0).round() as i32;
@@ -507,6 +519,8 @@ pub extern fn rast_draw(mode: RenderMode,
                 let y1 = (v1.y * 16.0).round() as i32;
                 let x2 = (v2.x * 16.0).round() as i32;
                 let y2 = (v2.y * 16.0).round() as i32;
+
+                // Edges
 
                 // Backface culling through cross product. The Z component of the
                 // resulting vector tells us if the triangle is facing the camera or not,
@@ -535,10 +549,16 @@ pub extern fn rast_draw(mode: RenderMode,
                 // interval and could otherwise miss intersections. Note that we only need
                 // to round up and not do a +1 since our fill convention assigns those
                 // intersections on the
-                let min_x = na::clamp((min3(x0, x1, x2) + 0xF) as i32 >> 4, 0, w);
-                let min_y = na::clamp((min3(y0, y1, y2) + 0xF) as i32 >> 4, 0, h);
-                let max_x = na::clamp((max3(x0, x1, x2) + 0xF) as i32 >> 4, 0, w);
-                let max_y = na::clamp((max3(y0, y1, y2) + 0xF) as i32 >> 4, 0, h);
+                let min_x = (min3(x0, x1, x2) + 0xF) >> 4;
+                let min_y = (min3(y0, y1, y2) + 0xF) >> 4;
+                let max_x = (max3(x0, x1, x2) + 0xF) >> 4;
+                let max_y = (max3(y0, y1, y2) + 0xF) >> 4;
+
+                // Clip against framebuffer
+                let min_x = na::clamp(min_x, 0, w);
+                let min_y = na::clamp(min_y, 0, h);
+                let max_x = na::clamp(max_x, 0, w);
+                let max_y = na::clamp(max_y, 0, h);
 
                 for y in min_y..max_y {
                     for x in min_x..max_x {
@@ -579,7 +599,17 @@ pub extern fn rast_draw(mode: RenderMode,
                             }
 
                             // Interpolate color
-                            let cf = *v0_col * b1 + *v1_col * b2 + *v2_col * b0;
+
+                            let w = 1.0 / ((1.0/vtx0.p.w) * b1 +
+                                           (1.0/vtx1.p.w) * b2 +
+                                           (1.0/vtx2.p.w) * b0);
+                            let cf_persp = ((*c0/vtx0.p.w) * b1 +
+                                            (*c1/vtx1.p.w) * b2 +
+                                            (*c2/vtx2.p.w) * b0) * w;
+
+                            let cf_no_persp = *c0 * b1 + *c1 * b2 + *c2 * b0;
+
+                            let cf = if y < h / 2 { cf_persp } else { cf_no_persp };
 
                             // Write color
                             unsafe {

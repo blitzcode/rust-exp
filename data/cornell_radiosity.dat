@@ -1,5 +1,5 @@
 # Simple ASCII Mesh File Format
-# 
+#
 # <Number of vertices>
 #
 # Px Py Pz ColR ColB ColG UVx UVy

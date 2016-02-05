@@ -20,6 +20,12 @@ lazy_static! {
     };
 }
 
+lazy_static! {
+    static ref TORUS_KNOT_MESH: Mesh = {
+        load_mesh(&String::from("data/torus_knot.dat"), MeshFileType:: XyzNxnynzAoao)
+    };
+}
+
 #[derive(Clone, Copy)]
 struct Vertex {
     p:   Pnt3<f32>,
@@ -362,7 +368,7 @@ fn draw_line(x1: f32, y1: f32, x2: f32, y2: f32, fb: *mut u32, w: i32, h: i32) {
 pub enum RenderMode { Point, Line, Fill }
 
 #[repr(i32)]
-pub enum Scene { Head, CornellBox }
+pub enum Scene { Head, CornellBox, TorusKnot }
 
 #[no_mangle]
 pub extern fn rast_draw(mode: RenderMode,
@@ -399,6 +405,7 @@ pub extern fn rast_draw(mode: RenderMode,
     let mesh: &Mesh = match scene {
         Scene::Head       => &HEAD_MESH,
         Scene::CornellBox => &CORNELL_MESH,
+        Scene::TorusKnot  => &TORUS_KNOT_MESH
     };
 
     // Build mesh to screen transformation
@@ -406,7 +413,7 @@ pub extern fn rast_draw(mode: RenderMode,
     let view         = na::to_homogeneous(
                            &look_at(
                                &match scene {
-                                   Scene::Head => Pnt3::new(
+                                   Scene::Head | Scene::TorusKnot => Pnt3::new(
                                        (tick.cos() * 2.0) as f32, 0.0, (tick.sin() * 2.0) as f32),
                                    Scene::CornellBox => Pnt3::new(
                                        (tick.cos() * 0.3) as f32, (tick.sin() * 0.3) as f32, 2.0),
@@ -416,8 +423,8 @@ pub extern fn rast_draw(mode: RenderMode,
     let proj         = *PerspMat3::new(
                            w as f32 / h as f32,
                            deg_to_rad(45.0),
-                           0.01,
-                           1000.0).as_mat();
+                           0.1,
+                           10.0).as_mat();
     let wh           = w as f32 / 2.0;
     let hh           = h as f32 / 2.0;
     let screen       = Mat4::new(wh,  0.0, 0.0, wh,

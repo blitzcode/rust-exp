@@ -9,26 +9,32 @@ use std::io::prelude::*;
 use std::f32;
 
 lazy_static! {
+    static ref CUBE_MESH: Mesh = {
+        load_mesh(&String::from("data/cube.dat"), MeshFileType::XyzNxNyNzRGB)
+    };
+}
+
+lazy_static! {
+    static ref SPHERE_MESH: Mesh = {
+        load_mesh(&String::from("data/sphere.dat"), MeshFileType::XyzNxNyNz)
+    };
+}
+
+lazy_static! {
     static ref CORNELL_MESH: Mesh = {
-        load_mesh(&String::from("data/cornell_radiosity.dat"), MeshFileType::XyzRgbXx)
+        load_mesh(&String::from("data/cornell_radiosity.dat"), MeshFileType::XyzRGB)
     };
 }
 
 lazy_static! {
     static ref HEAD_MESH: Mesh = {
-        load_mesh(&String::from("data/head_ao.dat"), MeshFileType:: XyzNxnynzAoao)
+        load_mesh(&String::from("data/head_ao.dat"), MeshFileType::XyzNxNyNzRGB)
     };
 }
 
 lazy_static! {
     static ref TORUS_KNOT_MESH: Mesh = {
-        load_mesh(&String::from("data/torus_knot.dat"), MeshFileType:: XyzNxnynzAoao)
-    };
-}
-
-lazy_static! {
-    static ref CUBE_MESH: Mesh = {
-        load_mesh(&String::from("data/cube.dat"), MeshFileType:: XyzRgbXx)
+        load_mesh(&String::from("data/torus_knot.dat"), MeshFileType::XyzNxNyNz)
     };
 }
 
@@ -128,15 +134,13 @@ fn min3<T: PartialOrd>(a: T, b: T, c: T) -> T {
     }
 }
 
-fn face_normal(v0: &Pnt3<f32>, v1: &Pnt3<f32>,  v2: &Pnt3<f32>) -> Vec3<f32> {
+fn face_normal(v0: &Pnt3<f32>, v1: &Pnt3<f32>, v2: &Pnt3<f32>) -> Vec3<f32> {
     na::cross(&(*v1 - *v0), &(*v2 - *v0)).normalize()
 }
 
-// We either have 'Px Py Pz ColR ColB ColG UVx UVy' with bogus UVs and radiosity data
-// in the color channel or 'Px Py Pz Nx Ny Nz UVx UVy' with ambient occlusion in both
-// texture coordinates
+// We have a few different combinations of vertex attributes in the mesh file format
 #[derive(PartialEq)]
-enum MeshFileType { XyzRgbXx, XyzNxnynzAoao }
+enum MeshFileType { XyzNxNyNz, XyzNxNyNzRGB, XyzRGB }
 
 fn load_mesh(file_name: &String, mesh_file_type: MeshFileType) -> Mesh {
     // Load a text format mesh from disk
@@ -193,24 +197,30 @@ fn load_mesh(file_name: &String, mesh_file_type: MeshFileType) -> Mesh {
             Some(ln) => {
                 let mut words = ln.split(" ");
                 let words_collect: Vec<&str> = words.clone().collect();
-                if words_collect.len() != 8 {
-                    panic!("load_mesh(): Expected 8 component vertices: {}", display);
+                let num_components = match mesh_file_type {
+                    MeshFileType::XyzNxNyNzRGB => 9,
+                    MeshFileType::XyzNxNyNz | MeshFileType::XyzRGB => 6
+                };
+                if words_collect.len() != num_components {
+                    panic!("load_mesh(): Expected {} component vertices: {}",
+                        num_components, display);
                 }
                 let mut components: Vec<f32> = Vec::new();
-                for _ in 0..8 {
+                for _ in 0..num_components {
                     components.push(words.next().unwrap().parse::<f32>().unwrap());
                 }
                 match mesh_file_type {
-                    MeshFileType::XyzRgbXx =>
+                    MeshFileType::XyzRGB =>
                         vtx.push(Vertex::new(components[0],
                                              components[1],
                                              components[2],
-                                             0.0, 0.0, 0.0, // Compute the normal later
+                                             // Compute the normal later
+                                             0.0, 0.0, 0.0,
                                              components[3],
                                              components[4],
                                              components[5]
                                             )),
-                    MeshFileType::XyzNxnynzAoao =>
+                    MeshFileType::XyzNxNyNzRGB =>
                         vtx.push(Vertex::new(components[0],
                                              components[1],
                                              components[2],
@@ -218,8 +228,20 @@ fn load_mesh(file_name: &String, mesh_file_type: MeshFileType) -> Mesh {
                                              components[4],
                                              components[5],
                                              components[6],
-                                             components[6],
-                                             components[6]
+                                             components[7],
+                                             components[8]
+                                            )),
+                    MeshFileType::XyzNxNyNz =>
+                        vtx.push(Vertex::new(components[0],
+                                             components[1],
+                                             components[2],
+                                             components[3],
+                                             components[4],
+                                             components[5],
+                                             // Just derive colors from normal
+                                             (components[3] + 1.0) / 2.0,
+                                             (components[4] + 1.0) / 2.0,
+                                             (components[5] + 1.0) / 2.0
                                             ))
                 }
                 // Done?
@@ -285,16 +307,21 @@ fn load_mesh(file_name: &String, mesh_file_type: MeshFileType) -> Mesh {
     let mut tri = Vec::new();
     for tri_idx in idx {
         let ntri = Triangle::new(tri_idx.0, tri_idx.1, tri_idx.2);
-        if mesh_file_type == MeshFileType::XyzRgbXx {
+        if mesh_file_type == MeshFileType::XyzRGB {
             // Set vertex normals from face normal
-            /* TODO
-            let n = face_normal(&vtx[tri_idx.0 as usize].p,
-                                &vtx[tri_idx.1 as usize].p,
-                                &vtx[tri_idx.2 as usize].p);
+            let v0p = Pnt3::new(vtx[tri_idx.0 as usize].p.x,
+                                vtx[tri_idx.0 as usize].p.y,
+                                vtx[tri_idx.0 as usize].p.z);
+            let v1p = Pnt3::new(vtx[tri_idx.1 as usize].p.x,
+                                vtx[tri_idx.1 as usize].p.y,
+                                vtx[tri_idx.1 as usize].p.z);
+            let v2p = Pnt3::new(vtx[tri_idx.2 as usize].p.x,
+                                vtx[tri_idx.2 as usize].p.y,
+                                vtx[tri_idx.2 as usize].p.z);
+            let n = face_normal(&v0p, &v1p, &v2p);
             vtx[tri_idx.0 as usize].n = n;
             vtx[tri_idx.1 as usize].n = n;
             vtx[tri_idx.2 as usize].n = n;
-            TODO */
         }
         tri.push(ntri);
     }
@@ -376,7 +403,7 @@ fn draw_line(x1: f32, y1: f32, x2: f32, y2: f32, fb: *mut u32, w: i32, h: i32) {
 pub enum RenderMode { Point, Line, Fill }
 
 #[repr(i32)]
-pub enum Scene { Head, CornellBox, TorusKnot, Cube }
+pub enum Scene { Cube, Sphere, CornellBox, Head, TorusKnot  }
 
 #[no_mangle]
 pub extern fn rast_draw(mode: RenderMode,
@@ -411,10 +438,11 @@ pub extern fn rast_draw(mode: RenderMode,
 
     // Scene mesh
     let mesh: &Mesh = match scene {
-        Scene::Head       => &HEAD_MESH,
+        Scene::Sphere     => &SPHERE_MESH,
+        Scene::Cube       => &CUBE_MESH,
         Scene::CornellBox => &CORNELL_MESH,
-        Scene::TorusKnot  => &TORUS_KNOT_MESH,
-        Scene::Cube       => &CUBE_MESH
+        Scene::Head       => &HEAD_MESH,
+        Scene::TorusKnot  => &TORUS_KNOT_MESH
     };
 
     // Build mesh to screen transformation
@@ -422,7 +450,10 @@ pub extern fn rast_draw(mode: RenderMode,
     let view         = na::to_homogeneous(
                            &look_at(
                                &match scene {
-                                   Scene::Head | Scene::TorusKnot | Scene::Cube => Pnt3::new(
+                                   Scene::Cube   |
+                                   Scene::Sphere |
+                                   Scene::Head   |
+                                   Scene::TorusKnot  => Pnt3::new(
                                        (tick.cos() * 2.0) as f32, 0.0, (tick.sin() * 2.0) as f32),
                                    Scene::CornellBox => Pnt3::new(
                                        (tick.cos() * 0.3) as f32, (tick.sin() * 0.3) as f32, 2.0),

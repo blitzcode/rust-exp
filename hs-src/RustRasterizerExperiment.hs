@@ -31,7 +31,7 @@ import WrapEnum
 data Mode = Point | Line | Fill
             deriving (Eq, Show, Enum, Bounded)
 
-data Scene = Head | CornellBox | TorusKnot | Cube
+data Scene = Cube | Sphere | CornellBox | Head | TorusKnot
              deriving (Eq, Show, Enum, Bounded)
 
 data RustRasterizerExperiment = RustRasterizerExperiment
@@ -46,7 +46,7 @@ makeLenses ''RustRasterizerExperiment
 instance Experiment RustRasterizerExperiment where
     withExperiment f = do f $ RustRasterizerExperiment { _rrTimes  = BS.empty 30
                                                        , _rrBgType = 1
-                                                       , _rrScene  = CornellBox
+                                                       , _rrScene  = Cube
                                                        , _rrMode   = Fill
                                                        }
     experimentName _ = "RustRasterizer"

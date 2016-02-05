@@ -388,10 +388,26 @@ fn draw_line(x1: f32, y1: f32, x2: f32, y2: f32, fb: *mut u32, w: i32, h: i32) {
     }
 }
 
+fn mesh_from_enum<'a>(scene: Scene) -> &'a Mesh {
+    match scene {
+        Scene::Sphere     => &SPHERE_MESH,
+        Scene::Cube       => &CUBE_MESH,
+        Scene::CornellBox => &CORNELL_MESH,
+        Scene::Head       => &HEAD_MESH,
+        Scene::TorusKnot  => &TORUS_KNOT_MESH
+    }
+}
+
+#[no_mangle]
+pub extern fn rast_get_mesh_tri_cnt(scene: Scene) -> i32 {
+    mesh_from_enum(scene).tri.len() as i32
+}
+
 #[repr(i32)]
 pub enum RenderMode { Point, Line, Fill }
 
 #[repr(i32)]
+#[derive(Copy, Clone)]
 pub enum Scene { Cube, Sphere, CornellBox, Head, TorusKnot  }
 
 #[no_mangle]
@@ -426,13 +442,7 @@ pub extern fn rast_draw(mode: RenderMode,
     }
 
     // Scene mesh
-    let mesh: &Mesh = match scene {
-        Scene::Sphere     => &SPHERE_MESH,
-        Scene::Cube       => &CUBE_MESH,
-        Scene::CornellBox => &CORNELL_MESH,
-        Scene::Head       => &HEAD_MESH,
-        Scene::TorusKnot  => &TORUS_KNOT_MESH
-    };
+    let mesh: &Mesh = mesh_from_enum(scene);
 
     // Build mesh to screen transformation
     let world        = mesh.normalize_dimensions();

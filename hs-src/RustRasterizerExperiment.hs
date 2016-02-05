@@ -46,7 +46,7 @@ makeLenses ''RustRasterizerExperiment
 instance Experiment RustRasterizerExperiment where
     withExperiment f = do f $ RustRasterizerExperiment { _rrTimes  = BS.empty 30
                                                        , _rrBgType = 1
-                                                       , _rrScene  = Cube
+                                                       , _rrScene  = CornellBox
                                                        , _rrMode   = Fill
                                                        }
     experimentName _ = "RustRasterizer"
@@ -69,12 +69,18 @@ instance Experiment RustRasterizerExperiment where
     experimentStatusString = do
         RustRasterizerExperiment { .. } <- get
         let avgtime = fromMaybe 1 . median . BS.toList $ _rrTimes
-        return $ printf "%.1fFPS/%.2fms | [B]grnd Type\nSc[e]ne %i/%i: %s | [M]ode: %s"
+        num_tri <- liftIO $ rastGetMeshTriCnt (fromIntegral $ fromEnum _rrScene)
+        return $ printf "%.1fFPS/%.2fms | [B]grnd Type\nSc[e]ne %i/%i: %s (%s) | [M]ode: %s"
                         (1 / avgtime)
                         (avgtime * 1000)
                         (fromEnum _rrScene + 1)
                         (fromEnum (maxBound :: Scene) + 1)
                         (show _rrScene)
+                        ( if   num_tri > 1000
+                          then printf "%.1fK Tri" (fromIntegral num_tri / 1000 :: Float)
+                          else printf "%i Tri" (fromIntegral num_tri :: Int)
+                          :: String
+                        )
                         (show _rrMode)
     experimentGLFWEvent ev = do
         case ev of
@@ -94,4 +100,6 @@ foreign import ccall "rast_draw" rastDraw :: CInt       -- Enum RenderMode
                                           -> CInt       -- Framebuffer Height
                                           -> Ptr Word32 -- Framebuffer Pointer
                                           -> IO ()
+
+foreign import ccall "rast_get_mesh_tri_cnt" rastGetMeshTriCnt :: CInt -> IO CInt
 

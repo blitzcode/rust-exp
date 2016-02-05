@@ -373,10 +373,6 @@ pub extern fn rast_draw(mode: RenderMode,
                         h: i32,
                         fb: *mut u32) -> () {
     // Transform, rasterize and shade mesh
-    //
-    // References:
-    //
-    // https://fgiesen.wordpress.com/2011/07/09/a-trip-through-the-graphics-pipeline-2011-index/
 
     // Background gradient
     let start;
@@ -479,14 +475,11 @@ pub extern fn rast_draw(mode: RenderMode,
 
         RenderMode::Fill => {
             // Rasterize with a fixed-point half-space algorithm
-            //
-            // References:
-            //
-            // http://forum.devmaster.net/t/advanced-rasterization/6145
-            // citeseerx.ist.psu.edu/viewdoc/download;'?doi=10.1.1.157.4621&rep=rep1&type=pdf
 
+            // Allocate depth buffer
             let mut depth: Vec<f32> = Vec::new();
             depth.resize((w * h) as usize, 1.0);
+            let depth_ptr = depth.as_mut_ptr();
 
             for t in &mesh.tri {
                 // Triangle vertex position
@@ -508,6 +501,14 @@ pub extern fn rast_draw(mode: RenderMode,
                 let x2 = (v2.x * 16.0).round() as i32;
                 let y2 = (v2.y * 16.0).round() as i32;
 
+                // Backface culling through cross product. The Z component of the
+                // resulting vector tells us if the triangle is facing the camera or not,
+                // its magnitude is the 2x the signed area of the triangle, which is
+                // exactly what we need to normalize our barycentric coordinates later
+                let tri_a2 = (x1 - x0) * (y2 - y0) - (y1 - y0) * (x2 - x0);
+                if tri_a2 <= 0 { continue }
+                let inv_tri_a2 = 1.0 / tri_a2 as f32;
+
                 // Implement top-left fill convention. Classifying those edges is simple,
                 // as with CCW vertex order they are either descending or horizontally
                 // moving right to left. We normally consider only raster positions as on
@@ -527,16 +528,13 @@ pub extern fn rast_draw(mode: RenderMode,
                 // interval and could otherwise miss intersections. Note that we only need
                 // to round up and not do a +1 since our fill convention assigns those
                 // intersections on the
-                let min_x = (min3(x0, x1, x2) + 0xF) as i32 >> 4;
-                let min_y = (min3(y0, y1, y2) + 0xF) as i32 >> 4;
-                let max_x = (max3(x0, x1, x2) + 0xF) as i32 >> 4;
-                let max_y = (max3(y0, y1, y2) + 0xF) as i32 >> 4;
+                let min_x = na::clamp((min3(x0, x1, x2) + 0xF) as i32 >> 4, 0, w);
+                let min_y = na::clamp((min3(y0, y1, y2) + 0xF) as i32 >> 4, 0, h);
+                let max_x = na::clamp((max3(x0, x1, x2) + 0xF) as i32 >> 4, 0, w);
+                let max_y = na::clamp((max3(y0, y1, y2) + 0xF) as i32 >> 4, 0, h);
 
                 for y in min_y..max_y {
                     for x in min_x..max_x {
-                        // Bounds check
-                        if x < 0 || x >= w || y < 0 || y >= h { continue }
-
                         // 28.4 coordinates of the current raster position
                         let xf = x << 4;
                         let yf = y << 4;
@@ -551,24 +549,34 @@ pub extern fn rast_draw(mode: RenderMode,
                         let w1 = (x2 - x1) * (yf - y1) - (y2 - y1) * (xf - x1) + e1add;
                         let w2 = (x0 - x2) * (yf - y2) - (y0 - y2) * (xf - x2) + e2add;
                         if w0 > 0 && w1 > 0 && w2 > 0 {
-                            // Draw
-                            let idx = x + y * w;
+                            // The cross product from the edge function not only tells us
+                            // which side we're on, but also the area of parallelogram
+                            // formed by the two vectors. We're basically getting twice
+                            // the area of one of the three triangles splitting the
+                            // original triangle around the raster position. Those are
+                            // already barycentric coordinates, we just need to normalize
+                            // them with the triangle area we already computed with the
+                            // cross product for the backface culling test
+                            let b0 = (w0 - e0add) as f32 * inv_tri_a2;
+                            let b1 = (w1 - e1add) as f32 * inv_tri_a2;
+                            let b2 = (w2 - e2add) as f32 * inv_tri_a2;
 
-                            let z = (
-                                v0.z * w1 as f32 +
-                                v1.z * w2 as f32 +
-                                v2.z * w0 as f32) / (w0 + w1 + w2) as f32;
+                            let idx = (x + y * w) as isize;
 
-                            if z > depth[idx as usize] { continue }
-
-                            depth[idx as usize] = z;
-
-                            let cf = (
-                                *v0_col * w1 as f32 +
-                                *v1_col * w2 as f32 +
-                                *v2_col * w0 as f32) / (w0 + w1 + w2) as f32;
+                            // Interpolate, test and write depth
+                            let z = v0.z * b1 + v1.z * b2 + v2.z * b0;
                             unsafe {
-                                * fb.offset(idx as isize) = rgbf_to_abgr32(cf.x, cf.y, cf.z);
+                                let d = depth_ptr.offset(idx);
+                                if z > *d { continue }
+                                *d = z;
+                            }
+
+                            // Interpolate color
+                            let cf = *v0_col * b1 + *v1_col * b2 + *v2_col * b0;
+
+                            // Write color
+                            unsafe {
+                                * fb.offset(idx) = rgbf_to_abgr32(cf.x, cf.y, cf.z);
                             }
                         }
                     }

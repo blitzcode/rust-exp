@@ -45,7 +45,7 @@ makeLenses ''RustRasterizerExperiment
 
 instance Experiment RustRasterizerExperiment where
     withExperiment f = do f $ RustRasterizerExperiment { _rrTimes  = BS.empty 30
-                                                       , _rrBgType = 3
+                                                       , _rrBgType = 1
                                                        , _rrScene  = CornellBox
                                                        , _rrMode   = Fill
                                                        }

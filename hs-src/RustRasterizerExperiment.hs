@@ -69,9 +69,11 @@ instance Experiment RustRasterizerExperiment where
     experimentStatusString = do
         RustRasterizerExperiment { .. } <- get
         let avgtime = fromMaybe 1 . median . BS.toList $ _rrTimes
-        return $ printf "%.1fFPS/%.2fms | [B]grnd Type\nSc[e]ne: %s | [M]ode: %s"
+        return $ printf "%.1fFPS/%.2fms | [B]grnd Type\nSc[e]ne %i/%i: %s | [M]ode: %s"
                         (1 / avgtime)
                         (avgtime * 1000)
+                        (fromEnum _rrScene + 1)
+                        (fromEnum (maxBound :: Scene) + 1)
                         (show _rrScene)
                         (show _rrMode)
     experimentGLFWEvent ev = do

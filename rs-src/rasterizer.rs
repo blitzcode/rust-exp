@@ -12,27 +12,15 @@ lazy_static! {
     static ref CUBE_MESH: Mesh = {
         load_mesh(&String::from("data/cube.dat"), MeshFileType::XyzNxNyNzRGB)
     };
-}
-
-lazy_static! {
     static ref SPHERE_MESH: Mesh = {
         load_mesh(&String::from("data/sphere.dat"), MeshFileType::XyzNxNyNz)
     };
-}
-
-lazy_static! {
     static ref CORNELL_MESH: Mesh = {
         load_mesh(&String::from("data/cornell_radiosity.dat"), MeshFileType::XyzRGB)
     };
-}
-
-lazy_static! {
     static ref HEAD_MESH: Mesh = {
         load_mesh(&String::from("data/head_ao.dat"), MeshFileType::XyzNxNyNzRGB)
     };
-}
-
-lazy_static! {
     static ref TORUS_KNOT_MESH: Mesh = {
         load_mesh(&String::from("data/torus_knot.dat"), MeshFileType::XyzNxNyNz)
     };
@@ -40,7 +28,7 @@ lazy_static! {
 
 #[derive(Clone, Copy)]
 struct Vertex {
-    p:   Pnt4<f32>,
+    p:   Pnt4<f32>, // Four components, want to be able to store W post-projection
     n:   Vec3<f32>,
     col: Vec3<f32>
 }
@@ -139,7 +127,7 @@ fn face_normal(v0: &Pnt3<f32>, v1: &Pnt3<f32>, v2: &Pnt3<f32>) -> Vec3<f32> {
 }
 
 // We have a few different combinations of vertex attributes in the mesh file format
-#[derive(PartialEq)]
+#[derive(PartialEq, Debug)]
 enum MeshFileType { XyzNxNyNz, XyzNxNyNzRGB, XyzRGB }
 
 fn load_mesh(file_name: &String, mesh_file_type: MeshFileType) -> Mesh {
@@ -328,8 +316,9 @@ fn load_mesh(file_name: &String, mesh_file_type: MeshFileType) -> Mesh {
     let mesh = Mesh::new(tri, vtx);
 
     // Print some mesh information
-    println!("load_mesh(): Loaded {} Tri and {} Vtx from '{}', AABB ({}, {}, {}) - ({}, {}, {})",
-        mesh.tri.len(), mesh.vtx.len(), display,
+    println!("load_mesh(): Loaded {} Tri and {} Vtx (format: {:?}) from '{}', \
+             AABB ({}, {}, {}) - ({}, {}, {})",
+        mesh.tri.len(), mesh.vtx.len(), mesh_file_type, display,
         mesh.aabb_min.x, mesh.aabb_min.y, mesh.aabb_min.z,
         mesh.aabb_max.x, mesh.aabb_max.y, mesh.aabb_max.z);
 
@@ -482,12 +471,17 @@ pub extern fn rast_draw(mode: RenderMode,
     for i in 0..mesh.vtx.len() {
         let src = &mesh.vtx[i];
         let dst = &mut vtx_transf[i];
-        // Homogeneous transform for the positions
-        //dst.p = na::from_homogeneous(&(transf * na::to_homogeneous(&src.p)));
+        // Homogeneous transform for the positions. Note that we do the perspective divide
+        // manually instead of using
+        //
+        // dst.p = na::from_homogeneous(&(transf * na::to_homogeneous(&src.p)));
+        //
+        // so we can keep W around
         dst.p = transf * src.p;
-        dst.p.x /= dst.p.w;
-        dst.p.y /= dst.p.w;
-        dst.p.z /= dst.p.w;
+        let inv_w = 1.0 / dst.p.w;
+        dst.p.x *= inv_w;
+        dst.p.y *= inv_w;
+        dst.p.z *= inv_w;
         // Multiply with the 3x3 IT for normals
         dst.n = (transf_it_33 * src.n).normalize();
         // Copy color
@@ -621,7 +615,10 @@ pub extern fn rast_draw(mode: RenderMode,
 
                             let idx = (x + y * w) as isize;
 
-                            // Interpolate, test and write depth
+                            // Interpolate, test and write depth. Note that we are
+                            // interpolating z/w, which is linear in screen space, no
+                            // special perspective correct interpolation required. We
+                            // also use a Z buffer, not a W buffer
                             let z = v0.z * b1 + v1.z * b2 + v2.z * b0;
                             unsafe {
                                 let d = depth_ptr.offset(idx);
@@ -629,18 +626,18 @@ pub extern fn rast_draw(mode: RenderMode,
                                 *d = z;
                             }
 
-                            // Interpolate color
-
+                            // Interpolate color (TODO: perspective correction)
+                            /*
                             let w = 1.0 / ((1.0/vtx0.p.w) * b1 +
                                            (1.0/vtx1.p.w) * b2 +
                                            (1.0/vtx2.p.w) * b0);
                             let cf_persp = ((*c0/vtx0.p.w) * b1 +
                                             (*c1/vtx1.p.w) * b2 +
                                             (*c2/vtx2.p.w) * b0) * w;
-
                             let cf_no_persp = *c0 * b1 + *c1 * b2 + *c2 * b0;
-
                             let cf = if y < h / 2 { cf_persp } else { cf_no_persp };
+                            */
+                            let cf = *c0 * b1 + *c1 * b2 + *c2 * b0;
 
                             // Write color
                             unsafe {

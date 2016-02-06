@@ -297,6 +297,8 @@ fn load_mesh(file_name: &String, mesh_file_type: MeshFileType) -> Mesh {
         let ntri = Triangle::new(tri_idx.0, tri_idx.1, tri_idx.2);
         if mesh_file_type == MeshFileType::XyzRGB {
             // Set vertex normals from face normal
+            // TODO: This obviously does not take sharing into account at all, but it's
+            //       OK for now as we're only using it with very simple meshes
             let v0p = Pnt3::new(vtx[tri_idx.0 as usize].p.x,
                                 vtx[tri_idx.0 as usize].p.y,
                                 vtx[tri_idx.0 as usize].p.z);
@@ -358,8 +360,7 @@ fn rgbf_to_abgr32(r: f32, g: f32, b: f32) -> u32 {
 }
 
 fn draw_line(x1: f32, y1: f32, x2: f32, y2: f32, fb: *mut u32, w: i32, h: i32) {
-    // Draw a line using the DDA algorithm. This is pretty poor code for various
-    // reasons, but just about good enough for debug drawing some wire frames
+    // Draw a line using the DDA algorithm
 
     // Just so edges with same vertices but different winding get the same coordinates
     let (x1, y1, x2, y2) = if x2 > x1 { (x1, y1, x2, y2) } else { (x2, y2, x1, y1) };
@@ -390,8 +391,8 @@ fn draw_line(x1: f32, y1: f32, x2: f32, y2: f32, fb: *mut u32, w: i32, h: i32) {
 
 fn mesh_from_enum<'a>(scene: Scene) -> &'a Mesh {
     match scene {
-        Scene::Sphere     => &SPHERE_MESH,
         Scene::Cube       => &CUBE_MESH,
+        Scene::Sphere     => &SPHERE_MESH,
         Scene::CornellBox => &CORNELL_MESH,
         Scene::Head       => &HEAD_MESH,
         Scene::TorusKnot  => &TORUS_KNOT_MESH
@@ -434,6 +435,7 @@ fn transform_vertices(mesh: &Mesh, w: i32, h: i32, eye: &Pnt3<f32>) -> Vec<Verte
     for i in 0..mesh.vtx.len() {
         let src = &mesh.vtx[i];
         let dst = &mut vtx_transf[i];
+
         // Homogeneous transform for the positions. Note that we do the perspective divide
         // manually instead of using
         //
@@ -445,8 +447,10 @@ fn transform_vertices(mesh: &Mesh, w: i32, h: i32, eye: &Pnt3<f32>) -> Vec<Verte
         dst.p.x *= inv_w;
         dst.p.y *= inv_w;
         dst.p.z *= inv_w;
+
         // Multiply with the 3x3 IT for normals
         dst.n = (transf_it_33 * src.n).normalize();
+
         // Copy color
         dst.col = src.col;
     }
@@ -552,7 +556,7 @@ pub extern fn rast_draw(mode: RenderMode,
         RenderMode::Fill => {
             // Rasterize with a fixed-point half-space algorithm
 
-            // Allocate depth buffer
+            // Allocate and clear depth buffer
             let mut depth: Vec<f32> = Vec::new();
             depth.resize((w * h) as usize, 1.0);
             let depth_ptr = depth.as_mut_ptr();

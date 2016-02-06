@@ -44,8 +44,8 @@ data RustRasterizerExperiment = RustRasterizerExperiment
 makeLenses ''RustRasterizerExperiment
 
 instance Experiment RustRasterizerExperiment where
-    withExperiment f = do f $ RustRasterizerExperiment { _rrTimes  = BS.empty 30
-                                                       , _rrBgType = 1
+    withExperiment f = do f $ RustRasterizerExperiment { _rrTimes  = BS.empty 60
+                                                       , _rrBgType = 0
                                                        , _rrScene  = CornellBox
                                                        , _rrMode   = Fill
                                                        }
@@ -101,5 +101,6 @@ foreign import ccall "rast_draw" rastDraw :: CInt       -- Enum RenderMode
                                           -> Ptr Word32 -- Framebuffer Pointer
                                           -> IO ()
 
-foreign import ccall "rast_get_mesh_tri_cnt" rastGetMeshTriCnt :: CInt -> IO CInt
+foreign import ccall "rast_get_mesh_tri_cnt" rastGetMeshTriCnt :: CInt    -- Enum Scene
+                                                               -> IO CInt
 

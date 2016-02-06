@@ -403,62 +403,13 @@ pub extern fn rast_get_mesh_tri_cnt(scene: Scene) -> i32 {
     mesh_from_enum(scene).tri.len() as i32
 }
 
-#[repr(i32)]
-pub enum RenderMode { Point, Line, Fill }
+fn transform_vertices(mesh: &Mesh, w: i32, h: i32, eye: &Pnt3<f32>) -> Vec<Vertex> {
+    // Build a mesh to screen transformation and return a transformed set of vertices
 
-#[repr(i32)]
-#[derive(Copy, Clone)]
-pub enum Scene { Cube, Sphere, CornellBox, Head, TorusKnot  }
-
-#[no_mangle]
-pub extern fn rast_draw(mode: RenderMode,
-                        scene: Scene,
-                        bg_type: i32,
-                        tick: f64,
-                        w: i32,
-                        h: i32,
-                        fb: *mut u32) -> () {
-    // Transform, rasterize and shade mesh
-
-    // Background gradient
-    let start;
-    let end;
-    match bg_type % 5 {
-        0 => { start = Vec3::new(0.3, 0.3, 0.3); end = Vec3::new(0.7, 0.7, 0.7); }
-        1 => { start = Vec3::new(1.0, 0.4, 0.0); end = Vec3::new(0.0, 0.5, 0.5); }
-        2 => { start = Vec3::new(1.0, 0.0, 1.0); end = Vec3::new(1.0, 0.0, 1.0); }
-        3 => { start = Vec3::new(1.0, 1.0, 1.0); end = Vec3::new(1.0, 1.0, 1.0); }
-        _ => { start = Vec3::new(0.0, 0.0, 0.0); end = Vec3::new(0.0, 0.0, 0.0); }
-    }
-    for y in 0..h {
-        let pos   = y as f32 / (h - 1) as f32;
-        let col   = start * (1.0 - pos) + end * pos;
-        let col32 = rgbf_to_abgr32(col.x, col.y, col.z);
-        for x in 0..w {
-            unsafe {
-                * fb.offset((x + y * w) as isize) = col32;
-            }
-        }
-    }
-
-    // Scene mesh
-    let mesh: &Mesh = mesh_from_enum(scene);
-
-    // Build mesh to screen transformation
+    // Build transformation
     let world        = mesh.normalize_dimensions();
     let view         = na::to_homogeneous(
-                           &look_at(
-                               &match scene {
-                                   Scene::Cube   |
-                                   Scene::Sphere |
-                                   Scene::Head   |
-                                   Scene::TorusKnot  => Pnt3::new(
-                                       (tick.cos() * 2.0) as f32, 0.0, (tick.sin() * 2.0) as f32),
-                                   Scene::CornellBox => Pnt3::new(
-                                       (tick.cos() * 0.3) as f32, (tick.sin() * 0.3) as f32, 2.0),
-                               },
-                               &Pnt3::new(0.0, 0.0, 0.0),
-                               &Vec3::y()));
+                           &look_at(eye, &Pnt3::new(0.0, 0.0, 0.0), &Vec3::y()));
     let proj         = *PerspMat3::new(
                            w as f32 / h as f32,
                            deg_to_rad(45.0),
@@ -474,8 +425,7 @@ pub extern fn rast_draw(mode: RenderMode,
     let transf_it_33 = na::from_homogeneous::<Mat4<f32>, Mat3<f32>>
                           (&transf.inv().unwrap().transpose());
 
-    // Transform vertices. Transform and copy into uninitialized vector instead
-    // of copy and transform in-place
+    // Transform and copy into uninitialized vector instead of copy and transform in-place
     let mut vtx_transf: Vec<Vertex> = Vec::with_capacity(mesh.vtx.len());
     unsafe { vtx_transf.set_len(mesh.vtx.len()); }
     for i in 0..mesh.vtx.len() {
@@ -497,6 +447,74 @@ pub extern fn rast_draw(mode: RenderMode,
         // Copy color
         dst.col = src.col;
     }
+
+    vtx_transf
+}
+
+fn draw_bg_gradient(bg_type: i32, w: i32, h: i32, fb: *mut u32) {
+    // Fill the framebuffer with a vertical gradient
+
+    let start;
+    let end;
+    match bg_type % 5 {
+        0 => { start = Vec3::new(0.3, 0.3, 0.3); end = Vec3::new(0.7, 0.7, 0.7); }
+        1 => { start = Vec3::new(1.0, 0.4, 0.0); end = Vec3::new(0.0, 0.5, 0.5); }
+        2 => { start = Vec3::new(1.0, 0.0, 1.0); end = Vec3::new(1.0, 0.0, 1.0); }
+        3 => { start = Vec3::new(1.0, 1.0, 1.0); end = Vec3::new(1.0, 1.0, 1.0); }
+        _ => { start = Vec3::new(0.0, 0.0, 0.0); end = Vec3::new(0.0, 0.0, 0.0); }
+    }
+
+    for y in 0..h {
+        let pos   = y as f32 / (h - 1) as f32;
+        let col   = start * (1.0 - pos) + end * pos;
+        let col32 = rgbf_to_abgr32(col.x, col.y, col.z);
+
+        for x in 0..w {
+            unsafe {
+                * fb.offset((x + y * w) as isize) = col32;
+            }
+        }
+    }
+}
+
+#[repr(i32)]
+pub enum RenderMode { Point, Line, Fill }
+
+#[repr(i32)]
+#[derive(Copy, Clone)]
+pub enum Scene { Cube, Sphere, CornellBox, Head, TorusKnot  }
+
+#[no_mangle]
+pub extern fn rast_draw(mode: RenderMode,
+                        scene: Scene,
+                        bg_type: i32,
+                        tick: f64,
+                        w: i32,
+                        h: i32,
+                        fb: *mut u32) -> () {
+    // Transform, rasterize and shade mesh
+
+    // Background gradient
+    draw_bg_gradient(bg_type, w, h, fb);
+
+    // Scene mesh
+    let mesh: &Mesh = mesh_from_enum(scene);
+
+    // let tick: f64 = 0.0;
+
+    // Camera position
+    let eye = match scene {
+        Scene::Cube   |
+        Scene::Sphere |
+        Scene::Head   |
+        Scene::TorusKnot  => Pnt3::new(
+            (tick.cos() * 2.0) as f32, 0.0, (tick.sin() * 2.0) as f32),
+        Scene::CornellBox => Pnt3::new(
+            (tick.cos() * 0.3) as f32, (tick.sin() * 0.3) as f32, 2.0),
+    };
+
+    // Transform
+    let vtx_transf = transform_vertices(&mesh, w, h, &eye);
 
     // Draw
     match mode {

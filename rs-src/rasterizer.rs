@@ -28,7 +28,7 @@ lazy_static! {
 
 #[derive(Clone, Copy)]
 struct Vertex {
-    p:   Pnt4<f32>, // Four components, want to be able to store W post-projection
+    p:   Pnt3<f32>,
     n:   Vec3<f32>,
     col: Vec3<f32>
 }
@@ -38,7 +38,7 @@ impl Vertex {
            nx: f32, ny: f32, nz: f32,
            r:  f32, g:  f32, b:  f32) -> Vertex {
         Vertex {
-            p:   Pnt4::new(px, py, pz, 1.0),
+            p:   Pnt3::new(px, py, pz),
             n:   Vec3::new(nx, ny, nz),
             col: Vec3::new(r , g , b)
         }
@@ -404,52 +404,61 @@ pub extern fn rast_get_mesh_tri_cnt(scene: Scene) -> i32 {
     mesh_from_enum(scene).tri.len() as i32
 }
 
-fn transform_vertices(mesh: &Mesh, w: i32, h: i32, eye: &Pnt3<f32>) -> Vec<Vertex> {
-    // Build a mesh to screen transformation and return a transformed set of vertices
+#[derive(Clone, Copy)]
+struct TransformedVertex {
+    vp:    Pnt4<f32>, // Projected, perspective divided, viewport transformed vertex with W
+    world: Pnt3<f32>, // World space vertex and normal for lighting computations etc.
+    n:     Vec3<f32>, // ...
+    col:   Vec3<f32>  // Color
+}
 
-    // Build transformation
-    let world        = mesh.normalize_dimensions();
-    let view         = na::to_homogeneous(
-                           &look_at(eye, &Pnt3::new(0.0, 0.0, 0.0), &Vec3::y()));
-    let proj         = *PerspMat3::new(
-                           w as f32 / h as f32,
-                           deg_to_rad(45.0),
-                           0.1,
-                           10.0).as_mat();
-    let wh           = w as f32 / 2.0;
-    let hh           = h as f32 / 2.0;
-                       // TODO: We're applying the viewport transform before the
-                       //       perspective divide, why does this actually work
-                       //       identically to doing it right after it below?
-    let screen       = Mat4::new(wh,  0.0, 0.0, wh,
-                                 0.0, hh,  0.0, hh,
-                                 0.0, 0.0, 1.0, 0.0,
-                                 0.0, 0.0, 0.0, 1.0);
-    let transf       = screen * proj * view * world;
-    let transf_it_33 = na::from_homogeneous::<Mat4<f32>, Mat3<f32>>
-                          (&transf.inv().unwrap().transpose());
+fn transform_vertices(mesh: &Mesh, w: i32, h: i32, eye: &Pnt3<f32>) -> Vec<TransformedVertex> {
+    // Build a mesh to viewport transformation and return a transformed set of vertices
+
+    // Build transformations
+    let mesh_to_world       = mesh.normalize_dimensions();
+    let world_to_view       = na::to_homogeneous(
+                                 &look_at(eye, &Pnt3::new(0.0, 0.0, 0.0), &Vec3::y()));
+    let view_to_proj        = *PerspMat3::new(
+                                  w as f32 / h as f32,
+                                  deg_to_rad(45.0),
+                                  0.1,
+                                  10.0).as_mat();
+    let wh                  = w as f32 / 2.0;
+    let hh                  = h as f32 / 2.0;
+                              // TODO: We're applying the viewport transform before the
+                              //       perspective divide, why does this actually work
+                              //       identically to doing it right after it below?
+    let proj_to_vp          = Mat4::new(wh,  0.0, 0.0, wh,
+                                        0.0, hh,  0.0, hh,
+                                        0.0, 0.0, 1.0, 0.0,
+                                        0.0, 0.0, 0.0, 1.0);
+    let world_to_vp          = proj_to_vp * view_to_proj * world_to_view;
+    let mesh_to_world_it_33  = na::from_homogeneous::<Mat4<f32>, Mat3<f32>>
+                                  (&mesh_to_world.inv().unwrap().transpose());
 
     // Transform and copy into uninitialized vector instead of copy and transform in-place
-    let mut vtx_transf: Vec<Vertex> = Vec::with_capacity(mesh.vtx.len());
+    let mut vtx_transf: Vec<TransformedVertex> = Vec::with_capacity(mesh.vtx.len());
     unsafe { vtx_transf.set_len(mesh.vtx.len()); }
     for i in 0..mesh.vtx.len() {
         let src = &mesh.vtx[i];
         let dst = &mut vtx_transf[i];
 
-        // Homogeneous transform for the positions. Note that we do the perspective divide
-        // manually instead of using
-        //
-        // dst.p = na::from_homogeneous(&(transf * na::to_homogeneous(&src.p)));
-        //
-        // so we can keep W around
-        dst.p = transf * src.p;
-        let inv_w = 1.0 / dst.p.w;
-        dst.p.x *= inv_w;
-        dst.p.y *= inv_w;
-        dst.p.z *= inv_w;
+        // Transform from mesh into world space
+        let world_h: Pnt4<f32> = mesh_to_world * na::to_homogeneous(&src.p);
+        dst.world = Pnt3::new(world_h.x, world_h.y, world_h.z);
 
-        // Multiply with the 3x3 IT for normals
-        dst.n = (transf_it_33 * src.n).normalize();
+        // World to viewport. Note that we do the perspective divide manually instead of using
+        //   dst = na::from_homogeneous(&(transf * na::to_homogeneous(&src)));
+        // so we can keep W around
+        dst.vp = world_to_vp * world_h;
+        let inv_w = 1.0 / dst.vp.w;
+        dst.vp.x *= inv_w;
+        dst.vp.y *= inv_w;
+        dst.vp.z *= inv_w;
+
+        // Multiply with the 3x3 IT for view space normals
+        dst.n = (mesh_to_world_it_33 * src.n).normalize();
 
         // Copy color
         dst.col = src.col;
@@ -528,9 +537,9 @@ pub extern fn rast_draw(mode: RenderMode,
         RenderMode::Point => {
             for t in &mesh.tri {
                 for idx in &[t.v0, t.v1, t.v2] {
-                    let proj = &vtx_transf[*idx as usize].p;
-                    let x    = proj.x as i32;
-                    let y    = proj.y as i32;
+                    let vp = &vtx_transf[*idx as usize].vp;
+                    let x    = vp.x as i32;
+                    let y    = vp.y as i32;
 
                     if x < 0 || x >= w || y < 0 || y >= h { continue }
 
@@ -545,10 +554,10 @@ pub extern fn rast_draw(mode: RenderMode,
         RenderMode::Line => {
             for t in &mesh.tri {
                 for &(idx1, idx2) in &[(t.v0, t.v1), (t.v1, t.v2), (t.v2, t.v0)] {
-                    let proj1 = &vtx_transf[idx1 as usize].p;
-                    let proj2 = &vtx_transf[idx2 as usize].p;
+                    let vp1 = &vtx_transf[idx1 as usize].vp;
+                    let vp2 = &vtx_transf[idx2 as usize].vp;
 
-                    draw_line(proj1.x, proj1.y, proj2.x, proj2.y, fb, w, h);
+                    draw_line(vp1.x, vp1.y, vp2.x, vp2.y, fb, w, h);
                 }
             }
         }
@@ -568,9 +577,9 @@ pub extern fn rast_draw(mode: RenderMode,
                 let vtx2 = &vtx_transf[t.v2 as usize];
 
                 // Break out positions, colors and normals
-                let v0 = &vtx0.p; let c0 = &vtx0.col; let n0 = &vtx0.n;
-                let v1 = &vtx1.p; let c1 = &vtx1.col; let n1 = &vtx1.n;
-                let v2 = &vtx2.p; let c2 = &vtx2.col; let n2 = &vtx2.n;
+                let v0 = &vtx0.vp; let c0 = &vtx0.col; let n0 = &vtx0.n;
+                let v1 = &vtx1.vp; let c1 = &vtx1.col; let n1 = &vtx1.n;
+                let v2 = &vtx2.vp; let c2 = &vtx2.col; let n2 = &vtx2.n;
 
                 // Convert to 28.4 fixed-point
                 let x0 = (v0.x * 16.0).round() as i32;
@@ -677,23 +686,23 @@ pub extern fn rast_draw(mode: RenderMode,
                                 *d = z;
                             }
 
+                            let inv_w = 1.0 / vtx0.vp.w;
+
                             // To do perspective correct interpolation of attributes we
                             // need to know w at the current raster position. We can
                             // compute it by interpolating 1/w linearly and then taking
                             // the reciprocal
-                            let w_raster = 1.0 / ((1.0 / vtx0.p.w) * b1 +
-                                                  (1.0 / vtx1.p.w) * b2 +
-                                                  (1.0 / vtx2.p.w) * b0);
+                            let w_raster = 1.0 / (inv_w * b1 + inv_w * b2 + inv_w * b0);
 
                             // Interpolate color and normal. Perspective correct interpolation
                             // of these quantities requires us to linearly interpolate a/w and
                             // then multiply by w
-                            let c_raster = ((* c0 / vtx0.p.w) * b1 +
-                                            (* c1 / vtx1.p.w) * b2 +
-                                            (* c2 / vtx2.p.w) * b0) * w_raster;
-                            let n_raster = ((* n0 / vtx0.p.w) * b1 +
-                                            (* n1 / vtx1.p.w) * b2 +
-                                            (* n2 / vtx2.p.w) * b0) * w_raster;
+                            let c_raster = (* c0 * inv_w * b1 +
+                                            * c1 * inv_w * b2 +
+                                            * c2 * inv_w * b0) * w_raster;
+                            let n_raster = (* n0 * inv_w * b1 +
+                                            * n1 * inv_w * b2 +
+                                            * n2 * inv_w * b0) * w_raster;
 
                             // Write color
                             unsafe {

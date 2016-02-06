@@ -573,8 +573,6 @@ pub extern fn rast_draw(mode: RenderMode,
                 let x2 = (v2.x * 16.0).round() as i32;
                 let y2 = (v2.y * 16.0).round() as i32;
 
-                // Edges
-
                 // Backface culling through cross product. The Z component of the
                 // resulting vector tells us if the triangle is facing the camera or not,
                 // its magnitude is the 2x the signed area of the triangle, which is
@@ -583,25 +581,33 @@ pub extern fn rast_draw(mode: RenderMode,
                 if tri_a2 <= 0 { continue }
                 let inv_tri_a2 = 1.0 / tri_a2 as f32;
 
-                // Implement top-left fill convention. Classifying those edges is simple,
-                // as with CCW vertex order they are either descending or horizontally
-                // moving right to left. We normally consider only raster positions as on
-                // the inside of an edge if the half-space function returns a positive
-                // value. For the top-left edges we want the contested raster positions
-                // lying on the edge to belong to its triangle. We basically want to turn
-                // the '> 0' comparison into '>= 0', and we do this by adding a constant 1
-                // for the half-space functions of those edges
-                let e0add = if (y1 - y0) < 0 || ((y1 - y0) == 0 && (x1 - x0) > 0) { 1 } else { 0 };
-                let e1add = if (y2 - y1) < 0 || ((y2 - y1) == 0 && (x2 - x1) > 0) { 1 } else { 0 };
-                let e2add = if (y0 - y2) < 0 || ((y0 - y2) == 0 && (x0 - x2) > 0) { 1 } else { 0 };
+                // We test triangle coverage at integer coordinates D3D9 style vs centers
+                // like >=D3D10 and OpenGL. Our pixel center is at the bottom-left. We
+                // also use a bottom-left fill convention, unlike the more conventional
+                // top-left one. It's what D3D does, but with the Y axis flipped (our
+                // origin is bottom-left). We normally consider only raster positions as
+                // on the inside of an edge if the half-space function returns a positive
+                // value. For the bottom-left edges we want the contested raster positions
+                // lying on the edge to belong to its triangle.
+                //
+                // Consider these two 2x2 triangulated quads and how they'd rasterize with
+                // each convention
+                //
+                // *--*--*    top-left    bottom-left
+                // |2   /|
+                // *  *  *      2 2           . .
+                // |/   3|      2 3           2 3
+                // *--*--*      0 0           3 3
+                // |0   /|      0 1           0 1
+                // *  *  *      . .           1 1
+                // |/   1|
+                // *--*--*
+                //
+                // With a bottom-left coordinate system origin and pixel center the latter
+                // fill convention just makes more sense to me. No need to shift our AABB's
+                // Y by one and we can just round up on both min / max bound
 
-                // AABB of the triangle. We can safely round up on the lower bound as
-                // there is no chance for coverage of the lower-left corner which we take
-                // as the pixel center. Round up on the upper
-                // bound as the loop over the AABB interprets the bounds as an open
-                // interval and could otherwise miss intersections. Note that we only need
-                // to round up and not do a +1 since our fill convention assigns those
-                // intersections on the
+                // AABB of the triangle, map to pixels by rounding up
                 let min_x = (min3(x0, x1, x2) + 0xF) >> 4;
                 let min_y = (min3(y0, y1, y2) + 0xF) >> 4;
                 let max_x = (max3(x0, x1, x2) + 0xF) >> 4;
@@ -612,6 +618,15 @@ pub extern fn rast_draw(mode: RenderMode,
                 let min_y = na::clamp(min_y, 0, h);
                 let max_x = na::clamp(max_x, 0, w);
                 let max_y = na::clamp(max_y, 0, h);
+
+                // Implement bottom-left fill convention. Classifying those edges is
+                // simple, as with CCW vertex order they are either descending or
+                // horizontally moving left to right. We basically want to turn the '> 0'
+                // comparison into '>= 0', and we do this by adding a constant 1 for the
+                // half-space functions of those edges
+                let e0add = if (y1 - y0) < 0 || ((y1 - y0) == 0 && (x1 - x0) > 0) { 1 } else { 0 };
+                let e1add = if (y2 - y1) < 0 || ((y2 - y1) == 0 && (x2 - x1) > 0) { 1 } else { 0 };
+                let e2add = if (y0 - y2) < 0 || ((y0 - y2) == 0 && (x0 - x2) > 0) { 1 } else { 0 };
 
                 for y in min_y..max_y {
                     for x in min_x..max_x {
@@ -636,7 +651,8 @@ pub extern fn rast_draw(mode: RenderMode,
                             // original triangle around the raster position. Those are
                             // already barycentric coordinates, we just need to normalize
                             // them with the triangle area we already computed with the
-                            // cross product for the backface culling test
+                            // cross product for the backface culling test. Don't forget
+                            // to remove the fill convention bias applied earlier
                             let b0 = (w0 - e0add) as f32 * inv_tri_a2;
                             let b1 = (w1 - e1add) as f32 * inv_tri_a2;
                             let b2 = (w2 - e2add) as f32 * inv_tri_a2;

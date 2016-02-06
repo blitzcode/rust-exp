@@ -417,6 +417,9 @@ fn transform_vertices(mesh: &Mesh, w: i32, h: i32, eye: &Pnt3<f32>) -> Vec<Verte
                            10.0).as_mat();
     let wh           = w as f32 / 2.0;
     let hh           = h as f32 / 2.0;
+                       // TODO: We're applying the viewport transform before the
+                       //       perspective divide, why does this actually work
+                       //       identically to doing it right after it below?
     let screen       = Mat4::new(wh,  0.0, 0.0, wh,
                                  0.0, hh,  0.0, hh,
                                  0.0, 0.0, 1.0, 0.0,
@@ -670,22 +673,28 @@ pub extern fn rast_draw(mode: RenderMode,
                                 *d = z;
                             }
 
-                            // Interpolate color (TODO: perspective correction)
-                            /*
-                            let w = 1.0 / ((1.0/vtx0.p.w) * b1 +
-                                           (1.0/vtx1.p.w) * b2 +
-                                           (1.0/vtx2.p.w) * b0);
-                            let cf_persp = ((*c0/vtx0.p.w) * b1 +
-                                            (*c1/vtx1.p.w) * b2 +
-                                            (*c2/vtx2.p.w) * b0) * w;
-                            let cf_no_persp = *c0 * b1 + *c1 * b2 + *c2 * b0;
-                            let cf = if y < h / 2 { cf_persp } else { cf_no_persp };
-                            */
-                            let cf = *c0 * b1 + *c1 * b2 + *c2 * b0;
+                            // To do perspective correct interpolation of attributes we
+                            // need to know w at the current raster position. We can
+                            // compute it by interpolating 1/w linearly and then taking
+                            // the reciprocal
+                            let w_raster = 1.0 / ((1.0 / vtx0.p.w) * b1 +
+                                                  (1.0 / vtx1.p.w) * b2 +
+                                                  (1.0 / vtx2.p.w) * b0);
+
+                            // Interpolate color and normal. Perspective correct interpolation
+                            // of these quantities requires us to linearly interpolate a/w and
+                            // then multiply by w
+                            let c_raster = ((* c0 / vtx0.p.w) * b1 +
+                                            (* c1 / vtx1.p.w) * b2 +
+                                            (* c2 / vtx2.p.w) * b0) * w_raster;
+                            let n_raster = ((* n0 / vtx0.p.w) * b1 +
+                                            (* n1 / vtx1.p.w) * b2 +
+                                            (* n2 / vtx2.p.w) * b0) * w_raster;
 
                             // Write color
                             unsafe {
-                                * fb.offset(idx) = rgbf_to_abgr32(cf.x, cf.y, cf.z);
+                                * fb.offset(idx) =
+                                    rgbf_to_abgr32(c_raster.x, c_raster.y, c_raster.z);
                             }
                         }
                     }

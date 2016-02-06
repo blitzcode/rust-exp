@@ -407,7 +407,7 @@ pub extern fn rast_get_mesh_tri_cnt(scene: Scene) -> i32 {
 #[derive(Clone, Copy)]
 struct TransformedVertex {
     vp:    Pnt4<f32>, // Projected, perspective divided, viewport transformed vertex with W
-    world: Pnt3<f32>, // World space vertex and normal for lighting computations etc.
+    world: Vec3<f32>, // World space vertex and normal for lighting computations etc.
     n:     Vec3<f32>, // ...
     col:   Vec3<f32>  // Color
 }
@@ -446,7 +446,7 @@ fn transform_vertices(mesh: &Mesh, w: i32, h: i32, eye: &Pnt3<f32>) -> Vec<Trans
 
         // Transform from mesh into world space
         let world_h: Pnt4<f32> = mesh_to_world * na::to_homogeneous(&src.p);
-        dst.world = Pnt3::new(world_h.x, world_h.y, world_h.z);
+        dst.world = Vec3::new(world_h.x, world_h.y, world_h.z);
 
         // World to viewport. Note that we do the perspective divide manually instead of using
         //   dst = na::from_homogeneous(&(transf * na::to_homogeneous(&src)));
@@ -576,10 +576,10 @@ pub extern fn rast_draw(mode: RenderMode,
                 let vtx1 = &vtx_transf[t.v1 as usize];
                 let vtx2 = &vtx_transf[t.v2 as usize];
 
-                // Break out positions, colors and normals
-                let v0 = &vtx0.vp; let c0 = &vtx0.col; let n0 = &vtx0.n;
-                let v1 = &vtx1.vp; let c1 = &vtx1.col; let n1 = &vtx1.n;
-                let v2 = &vtx2.vp; let c2 = &vtx2.col; let n2 = &vtx2.n;
+                // Break out positions (viewport and world), colors and normals
+                let v0 = &vtx0.vp; let p0 = &vtx0.world; let c0 = &vtx0.col; let n0 = &vtx0.n;
+                let v1 = &vtx1.vp; let p1 = &vtx1.world; let c1 = &vtx1.col; let n1 = &vtx1.n;
+                let v2 = &vtx2.vp; let p2 = &vtx2.world; let c2 = &vtx2.col; let n2 = &vtx2.n;
 
                 // Convert to 28.4 fixed-point
                 let x0 = (v0.x * 16.0).round() as i32;
@@ -656,10 +656,10 @@ pub extern fn rast_draw(mode: RenderMode,
                         // raster position to the edge. The resulting vector will either
                         // point into or out of the screen, so we can check which side of
                         // the edge we're on by the sign of the Z component
-                        let w0 = (x1 - x0) * (yf - y0) - (y1 - y0) * (xf - x0) + e0add;
-                        let w1 = (x2 - x1) * (yf - y1) - (y2 - y1) * (xf - x1) + e1add;
-                        let w2 = (x0 - x2) * (yf - y2) - (y0 - y2) * (xf - x2) + e2add;
-                        if w0 > 0 && w1 > 0 && w2 > 0 {
+                        let hs0 = (x1 - x0) * (yf - y0) - (y1 - y0) * (xf - x0) + e0add;
+                        let hs1 = (x2 - x1) * (yf - y1) - (y2 - y1) * (xf - x1) + e1add;
+                        let hs2 = (x0 - x2) * (yf - y2) - (y0 - y2) * (xf - x2) + e2add;
+                        if hs0 > 0 && hs1 > 0 && hs2 > 0 {
                             // The cross product from the edge function not only tells us
                             // which side we're on, but also the area of parallelogram
                             // formed by the two vectors. We're basically getting twice
@@ -669,9 +669,9 @@ pub extern fn rast_draw(mode: RenderMode,
                             // them with the triangle area we already computed with the
                             // cross product for the backface culling test. Don't forget
                             // to remove the fill convention bias applied earlier
-                            let b0 = (w0 - e0add) as f32 * inv_tri_a2;
-                            let b1 = (w1 - e1add) as f32 * inv_tri_a2;
-                            let b2 = (w2 - e2add) as f32 * inv_tri_a2;
+                            let b0 = (hs0 - e0add) as f32 * inv_tri_a2;
+                            let b1 = (hs1 - e1add) as f32 * inv_tri_a2;
+                            let b2 = (hs2 - e2add) as f32 * inv_tri_a2;
 
                             let idx = (x + y * w) as isize;
 
@@ -686,23 +686,28 @@ pub extern fn rast_draw(mode: RenderMode,
                                 *d = z;
                             }
 
-                            let inv_w = 1.0 / vtx0.vp.w;
+                            let inv_w_0 = 1.0 / vtx0.vp.w;
+                            let inv_w_1 = 1.0 / vtx1.vp.w;
+                            let inv_w_2 = 1.0 / vtx2.vp.w;
 
                             // To do perspective correct interpolation of attributes we
                             // need to know w at the current raster position. We can
                             // compute it by interpolating 1/w linearly and then taking
                             // the reciprocal
-                            let w_raster = 1.0 / (inv_w * b1 + inv_w * b2 + inv_w * b0);
+                            let w_raster = 1.0 / (inv_w_0 * b1 + inv_w_1 * b2 + inv_w_2 * b0);
 
-                            // Interpolate color and normal. Perspective correct interpolation
-                            // of these quantities requires us to linearly interpolate a/w and
-                            // then multiply by w
-                            let c_raster = (* c0 * inv_w * b1 +
-                                            * c1 * inv_w * b2 +
-                                            * c2 * inv_w * b0) * w_raster;
-                            let n_raster = (* n0 * inv_w * b1 +
-                                            * n1 * inv_w * b2 +
-                                            * n2 * inv_w * b0) * w_raster;
+                            // Interpolate world space position, color and normal. Perspective
+                            // correct interpolation of these quantities requires us to
+                            // linearly interpolate a/w and then multiply by w
+                            let p_raster = (* p0 * inv_w_0 * b1 +
+                                            * p1 * inv_w_1 * b2 +
+                                            * p2 * inv_w_2 * b0) * w_raster;
+                            let c_raster = (* c0 * inv_w_0 * b1 +
+                                            * c1 * inv_w_1 * b2 +
+                                            * c2 * inv_w_2 * b0) * w_raster;
+                            let n_raster = (* n0 * inv_w_0 * b1 +
+                                            * n1 * inv_w_1 * b2 +
+                                            * n2 * inv_w_2 * b0) * w_raster;
 
                             // Write color
                             unsafe {

@@ -72,7 +72,7 @@ instance Experiment RustRasterizerExperiment where
         let avgtime = fromMaybe 1 . median . BS.toList $ _rrTimes
         num_tri <- liftIO $ rastGetMeshTriCnt (fromIntegral $ fromEnum _rrScene)
         return $ printf ( "%.1fFPS/%.2fms | [B]grnd Type\nScene [Q][W] %i/%i: %s (%s) | " ++
-                          "Mod[e]: %s | %s"
+                          "[M]ode: %s | %s"
                         )
                         (1 / avgtime)
                         (avgtime * 1000)
@@ -86,8 +86,8 @@ instance Experiment RustRasterizerExperiment where
                         )
                         (show _rrMode)
                         ( if   _rrShadePerPixel
-                          then "Pe[r]Pixel"
-                          else "Pe[r]Vertex"
+                          then "[P]erPixel"
+                          else "[P]erVertex"
                         )
     experimentGLFWEvent ev = do
         case ev of
@@ -96,8 +96,8 @@ instance Experiment RustRasterizerExperiment where
                     GLFW.Key'B -> rrBgType        += 1
                     GLFW.Key'Q -> rrScene         %= wrapPred
                     GLFW.Key'W -> rrScene         %= wrapSucc
-                    GLFW.Key'E -> rrMode          %= wrapSucc
-                    GLFW.Key'R -> rrShadePerPixel %= not
+                    GLFW.Key'M -> rrMode          %= wrapSucc
+                    GLFW.Key'P -> rrShadePerPixel %= not
                     _          -> return ()
             _ -> return ()
 

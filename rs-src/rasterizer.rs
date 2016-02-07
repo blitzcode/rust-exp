@@ -327,43 +327,6 @@ fn load_mesh(file_name: &String, mesh_file_type: MeshFileType) -> Mesh {
     mesh
 }
 
-fn rgbf_to_abgr32(r: f32, g: f32, b: f32) -> u32 {
-    let r8 = (na::clamp(r, 0.0, 1.0) * 255.0) as u32;
-    let g8 = (na::clamp(g, 0.0, 1.0) * 255.0) as u32;
-    let b8 = (na::clamp(b, 0.0, 1.0) * 255.0) as u32;
-    r8 | (g8 << 8) | (b8 << 16)
-}
-
-fn draw_line(x1: f32, y1: f32, x2: f32, y2: f32, fb: *mut u32, w: i32, h: i32) {
-    // Draw a line using the DDA algorithm
-
-    // Just so edges with same vertices but different winding get the same coordinates
-    let (x1, y1, x2, y2) = if x2 > x1 { (x1, y1, x2, y2) } else { (x2, y2, x1, y1) };
-
-    let dx    = x2 - x1;
-    let dy    = y2 - y1;
-    let s     = if dx.abs() > dy.abs() { dx.abs() } else { dy.abs() };
-    let xi    = dx / s;
-    let yi    = dy / s;
-    let mut x = x1;
-    let mut y = y1;
-    let mut m = 0.0;
-
-    while m < s {
-        let xr = x as i32;
-        let yr = y as i32;
-
-        if xr >= 0 && xr < w && yr >= 0 && yr < h {
-            let idx = xr + yr * w;
-            unsafe { * fb.offset(idx as isize) = 0x00FFFFFF }
-        }
-
-        x += xi;
-        y += yi;
-        m += 1.0;
-    }
-}
-
 fn mesh_from_enum<'a>(scene: Scene) -> &'a Mesh {
     match scene {
         Scene::Cube       => &CUBE_MESH,
@@ -398,8 +361,8 @@ fn perspective(fovy_deg: f32, aspect: f32, near: f32, far: f32) -> Mat4<f32> {
     let tan_half_fovy = (deg_to_rad(fovy_deg) / 2.0).tan();
     let m00 = 1.0 / (aspect * tan_half_fovy);
     let m11 = 1.0 / tan_half_fovy;
-    let m22 = - (far + near) / (far - near);
-    let m23 = - (2.0 * far * near) / (far - near);
+    let m22 = -(far + near) / (far - near);
+    let m23 = -(2.0 * far * near) / (far - near);
     let m32 = -1.0;
 
     Mat4::new(m00, 0.0, 0.0, 0.0,
@@ -495,6 +458,49 @@ fn draw_bg_gradient(bg_type: i32, w: i32, h: i32, fb: *mut u32) {
             }
         }
     }
+}
+
+fn draw_line(x1: f32, y1: f32, x2: f32, y2: f32, fb: *mut u32, w: i32, h: i32) {
+    // Draw a line using the DDA algorithm
+
+    // Just so edges with same vertices but different winding get the same coordinates
+    let (x1, y1, x2, y2) = if x2 > x1 { (x1, y1, x2, y2) } else { (x2, y2, x1, y1) };
+
+    let dx    = x2 - x1;
+    let dy    = y2 - y1;
+    let s     = if dx.abs() > dy.abs() { dx.abs() } else { dy.abs() };
+    let xi    = dx / s;
+    let yi    = dy / s;
+    let mut x = x1;
+    let mut y = y1;
+    let mut m = 0.0;
+
+    while m < s {
+        let xr = x as i32;
+        let yr = y as i32;
+
+        if xr >= 0 && xr < w && yr >= 0 && yr < h {
+            let idx = xr + yr * w;
+            unsafe { * fb.offset(idx as isize) = 0x00FFFFFF }
+        }
+
+        x += xi;
+        y += yi;
+        m += 1.0;
+    }
+}
+
+fn reflect(i: &Vec3<f32>, n: &Vec3<f32>) -> Vec3<f32> {
+    // GLSL style reflection vector function
+    *i - (*n * na::dot(n, i) * 2.0)
+}
+// reflect(I, N) = I - 2.0 * dot(N, I) * N.
+
+fn rgbf_to_abgr32(r: f32, g: f32, b: f32) -> u32 {
+    let r8 = (na::clamp(r, 0.0, 1.0) * 255.0) as u32;
+    let g8 = (na::clamp(g, 0.0, 1.0) * 255.0) as u32;
+    let b8 = (na::clamp(b, 0.0, 1.0) * 255.0) as u32;
+    r8 | (g8 << 8) | (b8 << 16)
 }
 
 #[repr(i32)]
@@ -713,10 +719,40 @@ pub extern fn rast_draw(mode: RenderMode,
                                             * n1 * inv_w_1 * b2 +
                                             * n2 * inv_w_2 * b0) * w_raster;
 
+                            // Shading
+                            let out;
+                            {
+                                let n   = na::normalize(&n_raster);
+                                let eye = na::normalize(&(p_raster - eye.to_vec()));
+                                let r   = na::normalize(&reflect(&eye, &n));
+
+                                let light_1;
+                                {
+                                    let l     = Vec3::new(1.0, 1.0, 1.0).normalize();
+                                    let ldotn = na::clamp(na::dot(&l, &n), 0.0, 1.0);
+                                    let ldotr = na::clamp(na::dot(&l, &r), 0.0, 1.0).powf(16.0);
+                                    light_1   = ldotn * 0.75 + ldotr;
+                                }
+
+                                let light_2;
+                                {
+                                    let l     = -Vec3::new(1.0, 1.0, 1.0).normalize();
+                                    let ldotn = na::clamp(na::dot(&l, &n), 0.0, 1.0);
+                                    let ldotr = na::clamp(na::dot(&l, &r), 0.0, 1.0).powf(16.0);
+                                    light_2   = ldotn * 0.75 + ldotr;
+                                }
+
+                                let ambient   = Vec3::new(0.1, 0.1, 0.1);
+                                let light     = Vec3::new(1.0, 0.75, 0.75) * light_1 +
+                                                Vec3::new(0.75, 1.0, 1.0)  * light_2 +
+                                                ambient;
+                                let occlusion = c_raster * c_raster;
+                                out           = light * occlusion;
+                            }
+
                             // Write color
                             unsafe {
-                                * fb.offset(idx) =
-                                    rgbf_to_abgr32(c_raster.x, c_raster.y, c_raster.z);
+                                * fb.offset(idx) = rgbf_to_abgr32(out.x, out.y, out.z);
                             }
                         }
                     }

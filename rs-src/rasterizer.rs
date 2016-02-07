@@ -327,31 +327,6 @@ fn load_mesh(file_name: &String, mesh_file_type: MeshFileType) -> Mesh {
     mesh
 }
 
-fn look_at<N: BaseFloat>(eye: &Pnt3<N>, at: &Pnt3<N>, up: &Vec3<N>) -> Iso3<N> {
-    // The Iso3::look_at_z() function form nalgebra seems broken, this works as expected
-
-    let zaxis = na::normalize(&(*eye - *at));
-    let xaxis = na::normalize(&na::cross(up, &zaxis));
-    let yaxis = na::cross(&zaxis, &xaxis);
-
-    let rot = unsafe {
-        Rot3::new_with_mat(Mat3::new(
-            xaxis.x, yaxis.x, zaxis.x,
-            xaxis.y, yaxis.y, zaxis.y,
-            xaxis.z, yaxis.z, zaxis.z)
-        )
-    };
-
-    Iso3::new_with_rotmat(Vec3::new(na::dot(&xaxis, eye.as_vec()),
-                                    na::dot(&yaxis, eye.as_vec()),
-                                    na::dot(&zaxis, eye.as_vec())), rot)
-}
-
-fn deg_to_rad(deg: f32) -> f32 {
-    // std::f32::to_radians() is still unstable
-    deg * 0.0174532925
-}
-
 fn rgbf_to_abgr32(r: f32, g: f32, b: f32) -> u32 {
     let r8 = (na::clamp(r, 0.0, 1.0) * 255.0) as u32;
     let g8 = (na::clamp(g, 0.0, 1.0) * 255.0) as u32;
@@ -404,6 +379,40 @@ pub extern fn rast_get_mesh_tri_cnt(scene: Scene) -> i32 {
     mesh_from_enum(scene).tri.len() as i32
 }
 
+// The camera related functions in nalgebra like Iso3::look_at_z() and PerspMat3::new()
+// are all using some rather unusual conventions and are not documented. Replace them with
+// custom variants that work like the usual OpenGL style versions
+
+fn look_at(eye: &Pnt3<f32>, at: &Pnt3<f32>, up: &Vec3<f32>) -> Mat4<f32> {
+    let zaxis = na::normalize(&(*eye - *at));
+    let xaxis = na::normalize(&na::cross(up, &zaxis));
+    let yaxis = na::cross(&zaxis, &xaxis);
+
+    Mat4::new(xaxis.x, xaxis.y, xaxis.z, na::dot(&-eye.to_vec(), &xaxis),
+              yaxis.x, yaxis.y, yaxis.z, na::dot(&-eye.to_vec(), &yaxis),
+              zaxis.x, zaxis.y, zaxis.z, na::dot(&-eye.to_vec(), &zaxis),
+              0.0,     0.0,     0.0,     1.0)
+}
+
+fn perspective(fovy_deg: f32, aspect: f32, near: f32, far: f32) -> Mat4<f32> {
+    let tan_half_fovy = (deg_to_rad(fovy_deg) / 2.0).tan();
+    let m00 = 1.0 / (aspect * tan_half_fovy);
+    let m11 = 1.0 / tan_half_fovy;
+    let m22 = - (far + near) / (far - near);
+    let m23 = - (2.0 * far * near) / (far - near);
+    let m32 = -1.0;
+
+    Mat4::new(m00, 0.0, 0.0, 0.0,
+              0.0, m11, 0.0, 0.0,
+              0.0, 0.0, m22, m23,
+              0.0, 0.0, m32, 0.0)
+}
+
+fn deg_to_rad(deg: f32) -> f32 {
+    // std::f32::to_radians() is still unstable
+    deg * 0.0174532925
+}
+
 #[derive(Clone, Copy)]
 struct TransformedVertex {
     vp:    Pnt4<f32>, // Projected, perspective divided, viewport transformed vertex with W
@@ -417,13 +426,8 @@ fn transform_vertices(mesh: &Mesh, w: i32, h: i32, eye: &Pnt3<f32>) -> Vec<Trans
 
     // Build transformations
     let mesh_to_world       = mesh.normalize_dimensions();
-    let world_to_view       = na::to_homogeneous(
-                                 &look_at(eye, &Pnt3::new(0.0, 0.0, 0.0), &Vec3::y()));
-    let view_to_proj        = *PerspMat3::new(
-                                  w as f32 / h as f32,
-                                  deg_to_rad(45.0),
-                                  0.1,
-                                  10.0).as_mat();
+    let world_to_view       = look_at(eye, &Pnt3::new(0.0, 0.0, 0.0), &Vec3::y());
+    let view_to_proj        = perspective(45.0, w as f32 / h as f32, 0.1, 10.0);
     let wh                  = w as f32 / 2.0;
     let hh                  = h as f32 / 2.0;
                               // TODO: We're applying the viewport transform before the
@@ -433,8 +437,8 @@ fn transform_vertices(mesh: &Mesh, w: i32, h: i32, eye: &Pnt3<f32>) -> Vec<Trans
                                         0.0, hh,  0.0, hh,
                                         0.0, 0.0, 1.0, 0.0,
                                         0.0, 0.0, 0.0, 1.0);
-    let world_to_vp          = proj_to_vp * view_to_proj * world_to_view;
-    let mesh_to_world_it_33  = na::from_homogeneous::<Mat4<f32>, Mat3<f32>>
+    let world_to_vp         = proj_to_vp * view_to_proj * world_to_view;
+    let mesh_to_world_it_33 = na::from_homogeneous::<Mat4<f32>, Mat3<f32>>
                                   (&mesh_to_world.inv().unwrap().transpose());
 
     // Transform and copy into uninitialized vector instead of copy and transform in-place
@@ -451,7 +455,7 @@ fn transform_vertices(mesh: &Mesh, w: i32, h: i32, eye: &Pnt3<f32>) -> Vec<Trans
         // World to viewport. Note that we do the perspective divide manually instead of using
         //   dst = na::from_homogeneous(&(transf * na::to_homogeneous(&src)));
         // so we can keep W around
-        dst.vp = world_to_vp * world_h;
+        dst.vp    = world_to_vp * world_h;
         let inv_w = 1.0 / dst.vp.w;
         dst.vp.x *= inv_w;
         dst.vp.y *= inv_w;
@@ -526,7 +530,7 @@ pub extern fn rast_draw(mode: RenderMode,
         Scene::TorusKnot  => Pnt3::new(
             (tick.cos() * 2.0) as f32, 0.0, (tick.sin() * 2.0) as f32),
         Scene::CornellBox => Pnt3::new(
-            (tick.cos() * 0.3) as f32, (tick.sin() * 0.3) as f32, 2.0),
+            (tick.cos() * 0.3) as f32, (tick.sin() * 0.3) as f32, -2.0),
     };
 
     // Transform

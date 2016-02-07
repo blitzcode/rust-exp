@@ -35,30 +35,31 @@ data Scene = Cube | Sphere | CornellBox | Head | TorusKnot
              deriving (Eq, Show, Enum, Bounded)
 
 data RustRasterizerExperiment = RustRasterizerExperiment
-    { _rrTimes  :: !(BS.BoundedSequence Double)
-    , _rrBgType :: !Int
-    , _rrScene  :: !Scene
-    , _rrMode   :: !Mode
+    { _rrTimes         :: !(BS.BoundedSequence Double)
+    , _rrBgType        :: !Int
+    , _rrScene         :: !Scene
+    , _rrMode          :: !Mode
+    , _rrShadePerPixel :: !Bool
     }
 
 makeLenses ''RustRasterizerExperiment
 
 instance Experiment RustRasterizerExperiment where
-    withExperiment f = do f $ RustRasterizerExperiment { _rrTimes  = BS.empty 60
-                                                       , _rrBgType = 0
-                                                       , _rrScene  = Head
-                                                       , _rrMode   = Fill
+    withExperiment f = do f $ RustRasterizerExperiment { _rrTimes         = BS.empty 60
+                                                       , _rrBgType        = 0
+                                                       , _rrScene         = Head
+                                                       , _rrMode          = Fill
+                                                       , _rrShadePerPixel = False
                                                        }
     experimentName _ = "RustRasterizer"
     experimentDraw fb tick = do
-        mode   <- use rrMode
-        scene  <- use rrScene
-        bgtype <- use rrBgType
+        RustRasterizerExperiment { .. } <- get
         mbtime <- liftIO . fillFrameBuffer fb $ \w h vec ->
             VSM.unsafeWith vec $ \pvec ->
-                fst <$> timeIt (rastDraw (fromIntegral $ fromEnum mode)
-                                         (fromIntegral $ fromEnum scene)
-                                         (fromIntegral bgtype)
+                fst <$> timeIt (rastDraw (fromIntegral $ fromEnum _rrShadePerPixel)
+                                         (fromIntegral $ fromEnum _rrMode         )
+                                         (fromIntegral $ fromEnum _rrScene        )
+                                         (fromIntegral            _rrBgType       )
                                          (realToFrac tick)
                                          (fromIntegral w)
                                          (fromIntegral h)
@@ -70,7 +71,9 @@ instance Experiment RustRasterizerExperiment where
         RustRasterizerExperiment { .. } <- get
         let avgtime = fromMaybe 1 . median . BS.toList $ _rrTimes
         num_tri <- liftIO $ rastGetMeshTriCnt (fromIntegral $ fromEnum _rrScene)
-        return $ printf "%.1fFPS/%.2fms | [B]grnd Type\nSc[e]ne %i/%i: %s (%s) | [M]ode: %s"
+        return $ printf ( "%.1fFPS/%.2fms | [B]grnd Type\nScene [Q][W] %i/%i: %s (%s) | " ++
+                          "Mod[e]: %s | %s"
+                        )
                         (1 / avgtime)
                         (avgtime * 1000)
                         (fromEnum _rrScene + 1)
@@ -82,17 +85,24 @@ instance Experiment RustRasterizerExperiment where
                           :: String
                         )
                         (show _rrMode)
+                        ( if   _rrShadePerPixel
+                          then "Pe[r]Pixel"
+                          else "Pe[r]Vertex"
+                        )
     experimentGLFWEvent ev = do
         case ev of
             GLFWEventKey _win k _sc ks _mk | ks == GLFW.KeyState'Pressed ->
                 case k of
-                    GLFW.Key'B -> rrBgType += 1
-                    GLFW.Key'E -> rrScene  %= wrapSucc
-                    GLFW.Key'M -> rrMode   %= wrapSucc
+                    GLFW.Key'B -> rrBgType        += 1
+                    GLFW.Key'Q -> rrScene         %= wrapPred
+                    GLFW.Key'W -> rrScene         %= wrapSucc
+                    GLFW.Key'E -> rrMode          %= wrapSucc
+                    GLFW.Key'R -> rrShadePerPixel %= not
                     _          -> return ()
             _ -> return ()
 
-foreign import ccall "rast_draw" rastDraw :: CInt       -- Enum RenderMode
+foreign import ccall "rast_draw" rastDraw :: CInt       -- Shader per-pixel (bool)?
+                                          -> CInt       -- Enum RenderMode
                                           -> CInt       -- Enum Scene
                                           -> CInt       -- Background Type Idx
                                           -> CDouble    -- Tick

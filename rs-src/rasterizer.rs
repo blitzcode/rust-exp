@@ -1,6 +1,6 @@
 
-use na::{Vec3, Vec4, Pnt3, Pnt4, Mat3, Mat4, Iso3, PerspMat3, Rot3};
-use na::{Norm, Diag, Inv, Transpose, BaseFloat};
+use na::{Vec3, Vec4, Pnt3, Pnt4, Mat3, Mat4, Iso3};
+use na::{Norm, Diag, Inv, Transpose};
 use na;
 use std::path;
 use std::fs::File;
@@ -226,10 +226,8 @@ fn load_mesh(file_name: &String, mesh_file_type: MeshFileType) -> Mesh {
                                              components[3],
                                              components[4],
                                              components[5],
-                                             // Just derive colors from normal
-                                             (components[3] + 1.0) / 2.0,
-                                             (components[4] + 1.0) / 2.0,
-                                             (components[5] + 1.0) / 2.0
+                                             // White as default color
+                                             1.0, 1.0, 1.0
                                             ))
                 }
                 // Done?
@@ -424,8 +422,8 @@ fn transform_vertices(mesh: &Mesh, w: i32, h: i32, eye: &Pnt3<f32>) -> Vec<Trans
         dst.vp.y *= inv_w;
         dst.vp.z *= inv_w;
 
-        // Multiply with the 3x3 IT for view space normals
-        dst.n = (mesh_to_world_it_33 * src.n).normalize();
+        // Multiply with the 3x3 IT for world space normals
+        dst.n = mesh_to_world_it_33 * src.n;
 
         // Copy color
         dst.col = src.col;
@@ -494,7 +492,67 @@ fn reflect(i: &Vec3<f32>, n: &Vec3<f32>) -> Vec3<f32> {
     // GLSL style reflection vector function
     *i - (*n * na::dot(n, i) * 2.0)
 }
-// reflect(I, N) = I - 2.0 * dot(N, I) * N.
+
+// All shaders have this signature
+type Shader = fn(&Vec3<f32>, // World space position
+                 &Vec3<f32>, // World space normal
+                 &Vec3<f32>, // Color
+                 &Pnt3<f32>, // World space camera position
+                 f64) ->     // Current time (tick)
+                 Vec3<f32>;  // Output color
+
+fn shader_color(_p: &Vec3<f32>,
+                _n: &Vec3<f32>,
+                col: &Vec3<f32>,
+                _eye: &Pnt3<f32>,
+                _tick: f64) -> Vec3<f32> {
+    // Just use the static mesh color
+    *col
+}
+
+fn shader_n_to_color(_p: &Vec3<f32>,
+                     n: &Vec3<f32>,
+                     _col: &Vec3<f32>,
+                     _eye: &Pnt3<f32>,
+                     _tick: f64) -> Vec3<f32> {
+    // Convert the normal to a color
+    (n.normalize() + 1.0) * 0.5
+}
+
+fn shader_dir_light_ao(p: &Vec3<f32>,
+                       n: &Vec3<f32>,
+                       col: &Vec3<f32>,
+                       eye: &Pnt3<f32>,
+                       _tick: f64) -> Vec3<f32> {
+    // Specular material lit by two light sources, mesh color is treated as AO factor
+
+    let n   = na::normalize(n);
+    let eye = *p - *eye.as_vec();
+    let r   = na::normalize(&reflect(&eye, &n));
+    let l   = Vec3::new(0.577350269, 0.577350269, 0.577350269); // Normalized (1, 1, 1)
+
+    let light_1;
+    {
+        let ldotn = na::clamp(na::dot(&l, &n), 0.0, 1.0);
+        let ldotr = na::clamp(na::dot(&l, &r), 0.0, 1.0).powf(16.0);
+        light_1   = ldotn * 0.75 + ldotr;
+    }
+
+    let light_2;
+    {
+        let ldotn = na::clamp(na::dot(&-l, &n), 0.0, 1.0);
+        let ldotr = na::clamp(na::dot(&-l, &r), 0.0, 1.0).powf(16.0);
+        light_2   = ldotn * 0.75 + ldotr;
+    }
+
+    let ambient   = Vec3::new(0.1, 0.1, 0.1);
+    let light     = Vec3::new(1.0, 0.75, 0.75) * light_1 +
+                    Vec3::new(0.75, 1.0, 1.0)  * light_2 +
+                    ambient;
+    let occlusion = *col * *col;
+
+    light * occlusion
+}
 
 fn rgbf_to_abgr32(r: f32, g: f32, b: f32) -> u32 {
     let r8 = (na::clamp(r, 0.0, 1.0) * 255.0) as u32;
@@ -504,6 +562,7 @@ fn rgbf_to_abgr32(r: f32, g: f32, b: f32) -> u32 {
 }
 
 #[repr(i32)]
+#[derive(PartialEq)]
 pub enum RenderMode { Point, Line, Fill }
 
 #[repr(i32)]
@@ -511,7 +570,8 @@ pub enum RenderMode { Point, Line, Fill }
 pub enum Scene { Cube, Sphere, CornellBox, Head, TorusKnot  }
 
 #[no_mangle]
-pub extern fn rast_draw(mode: RenderMode,
+pub extern fn rast_draw(shade_per_pixel: i32,
+                        mode: RenderMode,
                         scene: Scene,
                         bg_type: i32,
                         tick: f64,
@@ -520,15 +580,20 @@ pub extern fn rast_draw(mode: RenderMode,
                         fb: *mut u32) -> () {
     // Transform, rasterize and shade mesh
 
-    // Background gradient
-    draw_bg_gradient(bg_type, w, h, fb);
-
-    // Scene mesh
-    let mesh: &Mesh = mesh_from_enum(scene);
+    // Avoid passing a bool over the FFI, convert now
+    let shade_per_pixel: bool = shade_per_pixel != 0;
 
     // let tick: f64 = 0.0;
 
-    // Camera position
+    // Build a scene (mesh, shader, camera position)
+    let mesh: &Mesh = mesh_from_enum(scene);
+    let shader: Shader = match scene {
+        Scene::Cube   |
+        Scene::Sphere |
+        Scene::TorusKnot  => shader_n_to_color,
+        Scene::CornellBox => shader_color,
+        Scene::Head       => shader_dir_light_ao
+    };
     let eye = match scene {
         Scene::Cube   |
         Scene::Sphere |
@@ -540,7 +605,17 @@ pub extern fn rast_draw(mode: RenderMode,
     };
 
     // Transform
-    let vtx_transf = transform_vertices(&mesh, w, h, &eye);
+    let mut vtx_transf = transform_vertices(&mesh, w, h, &eye);
+
+    // Do vertex shading?
+    if !shade_per_pixel && mode == RenderMode::Fill {
+        for vtx in &mut vtx_transf {
+            vtx.col = shader(&vtx.world, &vtx.n, &vtx.col, &eye, tick);
+        }
+    }
+
+    // Background gradient
+    draw_bg_gradient(bg_type, w, h, fb);
 
     // Draw
     match mode {
@@ -706,49 +781,29 @@ pub extern fn rast_draw(mode: RenderMode,
                             // the reciprocal
                             let w_raster = 1.0 / (inv_w_0 * b1 + inv_w_1 * b2 + inv_w_2 * b0);
 
-                            // Interpolate world space position, color and normal. Perspective
-                            // correct interpolation of these quantities requires us to
-                            // linearly interpolate a/w and then multiply by w
-                            let p_raster = (* p0 * inv_w_0 * b1 +
-                                            * p1 * inv_w_1 * b2 +
-                                            * p2 * inv_w_2 * b0) * w_raster;
+                            // Interpolate color. Perspective correct interpolation requires
+                            // us to linearly interpolate col/w and then multiply by w
                             let c_raster = (* c0 * inv_w_0 * b1 +
                                             * c1 * inv_w_1 * b2 +
                                             * c2 * inv_w_2 * b0) * w_raster;
-                            let n_raster = (* n0 * inv_w_0 * b1 +
-                                            * n1 * inv_w_1 * b2 +
-                                            * n2 * inv_w_2 * b0) * w_raster;
 
                             // Shading
-                            let out;
-                            {
-                                let n   = na::normalize(&n_raster);
-                                let eye = na::normalize(&(p_raster - eye.to_vec()));
-                                let r   = na::normalize(&reflect(&eye, &n));
+                            let out = if shade_per_pixel {
+                                // Also do perspective correct interpolation of the vertex normal
+                                // and world space position, the shader might want these
+                                let p_raster = (* p0 * inv_w_0 * b1 +
+                                                * p1 * inv_w_1 * b2 +
+                                                * p2 * inv_w_2 * b0) * w_raster;
+                                let n_raster = (* n0 * inv_w_0 * b1 +
+                                                * n1 * inv_w_1 * b2 +
+                                                * n2 * inv_w_2 * b0) * w_raster;
 
-                                let light_1;
-                                {
-                                    let l     = Vec3::new(1.0, 1.0, 1.0).normalize();
-                                    let ldotn = na::clamp(na::dot(&l, &n), 0.0, 1.0);
-                                    let ldotr = na::clamp(na::dot(&l, &r), 0.0, 1.0).powf(16.0);
-                                    light_1   = ldotn * 0.75 + ldotr;
-                                }
-
-                                let light_2;
-                                {
-                                    let l     = -Vec3::new(1.0, 1.0, 1.0).normalize();
-                                    let ldotn = na::clamp(na::dot(&l, &n), 0.0, 1.0);
-                                    let ldotr = na::clamp(na::dot(&l, &r), 0.0, 1.0).powf(16.0);
-                                    light_2   = ldotn * 0.75 + ldotr;
-                                }
-
-                                let ambient   = Vec3::new(0.1, 0.1, 0.1);
-                                let light     = Vec3::new(1.0, 0.75, 0.75) * light_1 +
-                                                Vec3::new(0.75, 1.0, 1.0)  * light_2 +
-                                                ambient;
-                                let occlusion = c_raster * c_raster;
-                                out           = light * occlusion;
-                            }
+                                // Call shader
+                                shader(&p_raster, &n_raster, &c_raster, &eye, tick)
+                            } else {
+                                // Just write interpolated per-vertex shading result
+                                c_raster
+                            };
 
                             // Write color
                             unsafe {

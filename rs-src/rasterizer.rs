@@ -335,19 +335,6 @@ fn load_mesh(file_name: &String, mesh_file_type: MeshFileType) -> Mesh {
     mesh
 }
 
-fn mesh_from_enum<'a>(scene: Scene) -> &'a Mesh {
-    match scene {
-        Scene::Cube       => &CUBE_MESH,
-        Scene::Sphere     => &SPHERE_MESH,
-        Scene::CornellBox => &CORNELL_MESH,
-        Scene::Head       => &HEAD_MESH,
-        Scene::TorusKnot  => &TORUS_KNOT_MESH,
-        Scene::Killeroo   => &KILLEROO_MESH,
-        Scene::Hand       => &HAND_MESH,
-        Scene::Cat        => &CAT_MESH
-    }
-}
-
 #[no_mangle]
 pub extern fn rast_get_mesh_tri_cnt(scene: Scene) -> i32 {
     mesh_from_enum(scene).tri.len() as i32
@@ -575,6 +562,90 @@ fn shader_dir_light_ao(p: &Vec3<f32>,
     light * occlusion
 }
 
+fn mesh_from_enum<'a>(scene: Scene) -> &'a Mesh {
+    match scene {
+        Scene::Cube       => &CUBE_MESH,
+        Scene::Sphere     => &SPHERE_MESH,
+        Scene::CornellBox => &CORNELL_MESH,
+        Scene::Head       => &HEAD_MESH,
+        Scene::TorusKnot  => &TORUS_KNOT_MESH,
+        Scene::Killeroo   => &KILLEROO_MESH,
+        Scene::Hand       => &HAND_MESH,
+        Scene::Cat        => &CAT_MESH
+    }
+}
+
+fn smootherstep(edge0: f32, edge1: f32, x: f32) -> f32
+{
+    // Scale and clamp x to 0..1 range
+    let x = na::clamp((x - edge0) / (edge1 - edge0), 0.0, 1.0);
+    // Evaluate polynomial
+    x * x * x * (x * (x * 6.0 - 15.0) + 10.0)
+}
+
+fn build_scene<'a>(scene: Scene, tick: f64) -> (&'a Mesh, Shader, Pnt3<f32>) {
+    // Build a scene (mesh, shader, camera position)
+
+    let mesh = mesh_from_enum(scene);
+
+    let shader: Shader = match scene {
+        Scene::Cube       => shader_color,
+        Scene::Sphere     => shader_n_to_color,
+        Scene::TorusKnot  => shader_n_to_color,
+        Scene::CornellBox => shader_color,
+        Scene::Head       => shader_dir_light_ao,
+        Scene::Killeroo   => shader_color,
+        Scene::Hand       => shader_color,
+        Scene::Cat        => shader_dir_light_ao
+    };
+
+    let eye = match scene {
+        Scene::Cube   |
+        Scene::Sphere |
+        Scene::TorusKnot =>
+            // Orbit around object
+            Pnt3::new(((tick / 1.25).cos() * 1.8) as f32,
+                      0.0,
+                      ((tick / 1.25).sin() * 1.8) as f32),
+
+        Scene::Head |
+        Scene::Hand |
+        Scene::Cat =>
+            // Orbit closer around object
+            Pnt3::new(((tick / 1.25).cos() * 1.6) as f32,
+                      0.0,
+                      ((tick / 1.25).sin() * 1.6) as f32),
+
+        Scene::Killeroo => {
+            // Slow, dampened pan around the front of the object,
+            // some slow vertical bobbing as well
+            let tick_slow = tick / 3.5;
+            let reverse   = tick_slow as i64 % 2 == 1;
+            let tick_f    = if reverse {
+                                1.0 - tick_slow.fract()
+                            } else {
+                                tick_slow.fract()
+                            } as f32;
+            let smooth    = smootherstep(0.0, 1.0, tick_f);
+            let a_weight  = 1.0 - smooth;
+            let b_weight  = smooth;
+            let tick_seg  = -consts::PI / 2.0 -
+                            (-(consts::PI / 6.0) * a_weight + (consts::PI / 6.0) * b_weight);
+            Pnt3::new(tick_seg.cos() as f32,
+                      ((tick / 2.0).sin() * 0.25 + 0.2) as f32,
+                      tick_seg.sin() as f32)
+        }
+
+        Scene::CornellBox =>
+            // Camera makes circular motion in front of the box (which is backwards)
+            Pnt3::new((tick.cos() * 0.3) as f32,
+                      (tick.sin() * 0.3) as f32,
+                      -2.0)
+    };
+
+    (mesh, shader, eye)
+}
+
 fn rgbf_to_abgr32(r: f32, g: f32, b: f32) -> u32 {
     let r8 = (na::clamp(r, 0.0, 1.0) * 255.0) as u32;
     let g8 = (na::clamp(g, 0.0, 1.0) * 255.0) as u32;
@@ -589,14 +660,6 @@ pub enum RenderMode { Point, Line, Fill }
 #[repr(i32)]
 #[derive(Copy, Clone)]
 pub enum Scene { Cube, Sphere, CornellBox, Head, TorusKnot, Killeroo, Hand, Cat  }
-
-fn smootherstep(edge0: f32, edge1: f32, x: f32) -> f32
-{
-    // Scale and clamp x to 0..1 range
-    let x = na::clamp((x - edge0) / (edge1 - edge0), 0.0, 1.0);
-    // Evaluate polynomial
-    x * x * x * (x * (x * 6.0 - 15.0) + 10.0)
-}
 
 #[no_mangle]
 pub extern fn rast_draw(shade_per_pixel: i32,
@@ -614,47 +677,8 @@ pub extern fn rast_draw(shade_per_pixel: i32,
 
     // let tick: f64 = 0.0;
 
-    // Build a scene (mesh, shader, camera position)
-    let mesh: &Mesh = mesh_from_enum(scene);
-    let shader: Shader = match scene {
-        Scene::Cube       => shader_color,
-        Scene::Sphere     => shader_n_to_color,
-        Scene::TorusKnot  => shader_n_to_color,
-        Scene::CornellBox => shader_color,
-        Scene::Head       => shader_dir_light_ao,
-        Scene::Killeroo   => shader_color,
-        Scene::Hand       => shader_color,
-        Scene::Cat        => shader_dir_light_ao
-    };
-    let eye = match scene {
-        Scene::Cube   |
-        Scene::Sphere |
-        Scene::TorusKnot => Pnt3::new(
-            ((tick / 1.25).cos() * 1.8) as f32, 0.0, ((tick / 1.25).sin() * 1.8) as f32),
-        Scene::Head |
-        Scene::Hand |
-        Scene::Cat => Pnt3::new(
-            ((tick / 1.25).cos() * 1.6) as f32, 0.0, ((tick / 1.25).sin() * 1.6) as f32),
-        Scene::Killeroo => {
-            let tick_slow = tick / 3.5;
-            let reverse   = tick_slow as i64 % 2 == 1;
-            let tick_f    = if reverse {
-                                1.0 - tick_slow.fract()
-                            } else {
-                                tick_slow.fract()
-                            } as f32;
-            let smooth    = smootherstep(0.0, 1.0, tick_f);
-            let a_weight  = 1.0 - smooth;
-            let b_weight  = smooth;
-            let tick_seg  = -consts::PI / 2.0 -
-                            (-(consts::PI / 6.0) * a_weight + (consts::PI / 6.0) * b_weight);
-            Pnt3::new(tick_seg.cos() as f32,
-                      ((tick / 2.0).sin() * 0.25 + 0.2) as f32,
-                      tick_seg.sin() as f32)
-        }
-        Scene::CornellBox => Pnt3::new(
-            (tick.cos() * 0.3) as f32, (tick.sin() * 0.3) as f32, -2.0),
-    };
+    // Scene
+    let (mesh, shader, eye) = build_scene(scene, tick);
 
     // Transform
     let mut vtx_transf = transform_vertices(&mesh, w, h, &eye);

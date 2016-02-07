@@ -532,6 +532,14 @@ fn shader_n_to_color(_p: &Vec3<f32>,
     (n.normalize() + 1.0) * 0.5
 }
 
+/*
+// TODO: nalgbera doesn't use a reciprocal
+fn fast_normalize(n: &Vec3<f32>) -> Vec3<f32> {
+    let l = 1.0 / (n.x * n.x + n.y * n.y + n.z * n.z).sqrt();
+    Vec3::new(n.x * l, n.y * l, n.z * l)
+}
+*/
+
 fn shader_dir_light_ao(p: &Vec3<f32>,
                        n: &Vec3<f32>,
                        col: &Vec3<f32>,
@@ -584,7 +592,7 @@ pub enum Scene { Cube, Sphere, CornellBox, Head, TorusKnot, Killeroo, Hand, Cat 
 
 fn smootherstep(edge0: f32, edge1: f32, x: f32) -> f32
 {
-    // Scale, and clamp x to 0..1 range
+    // Scale and clamp x to 0..1 range
     let x = na::clamp((x - edge0) / (edge1 - edge0), 0.0, 1.0);
     // Evaluate polynomial
     x * x * x * (x * (x * 6.0 - 15.0) + 10.0)
@@ -609,14 +617,14 @@ pub extern fn rast_draw(shade_per_pixel: i32,
     // Build a scene (mesh, shader, camera position)
     let mesh: &Mesh = mesh_from_enum(scene);
     let shader: Shader = match scene {
-        Scene::Cube   |
-        Scene::Sphere |
+        Scene::Cube       => shader_color,
+        Scene::Sphere     => shader_n_to_color,
         Scene::TorusKnot  => shader_n_to_color,
         Scene::CornellBox => shader_color,
         Scene::Head       => shader_dir_light_ao,
         Scene::Killeroo   => shader_color,
         Scene::Hand       => shader_color,
-        Scene::Cat        => shader_color
+        Scene::Cat        => shader_dir_light_ao
     };
     let eye = match scene {
         Scene::Cube   |

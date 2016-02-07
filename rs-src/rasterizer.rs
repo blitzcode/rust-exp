@@ -7,6 +7,7 @@ use std::fs::File;
 use std::error::Error;
 use std::io::prelude::*;
 use std::f32;
+use std::f32::consts;
 
 lazy_static! {
     static ref CUBE_MESH: Mesh = {
@@ -23,6 +24,15 @@ lazy_static! {
     };
     static ref TORUS_KNOT_MESH: Mesh = {
         load_mesh(&String::from("data/torus_knot.dat"), MeshFileType::XyzNxNyNz)
+    };
+    static ref KILLEROO_MESH: Mesh = {
+        load_mesh(&String::from("data/killeroo_ao.dat"), MeshFileType::XyzNxNyNzRGB)
+    };
+    static ref HAND_MESH: Mesh = {
+        load_mesh(&String::from("data/hand_ao.dat"), MeshFileType::XyzNxNyNzRGB)
+    };
+    static ref CAT_MESH: Mesh = {
+        load_mesh(&String::from("data/cat_ao.dat"), MeshFileType::XyzNxNyNzRGB)
     };
 }
 
@@ -331,7 +341,10 @@ fn mesh_from_enum<'a>(scene: Scene) -> &'a Mesh {
         Scene::Sphere     => &SPHERE_MESH,
         Scene::CornellBox => &CORNELL_MESH,
         Scene::Head       => &HEAD_MESH,
-        Scene::TorusKnot  => &TORUS_KNOT_MESH
+        Scene::TorusKnot  => &TORUS_KNOT_MESH,
+        Scene::Killeroo   => &KILLEROO_MESH,
+        Scene::Hand       => &HAND_MESH,
+        Scene::Cat        => &CAT_MESH
     }
 }
 
@@ -567,7 +580,15 @@ pub enum RenderMode { Point, Line, Fill }
 
 #[repr(i32)]
 #[derive(Copy, Clone)]
-pub enum Scene { Cube, Sphere, CornellBox, Head, TorusKnot  }
+pub enum Scene { Cube, Sphere, CornellBox, Head, TorusKnot, Killeroo, Hand, Cat  }
+
+fn smootherstep(edge0: f32, edge1: f32, x: f32) -> f32
+{
+    // Scale, and clamp x to 0..1 range
+    let x = na::clamp((x - edge0) / (edge1 - edge0), 0.0, 1.0);
+    // Evaluate polynomial
+    x * x * x * (x * (x * 6.0 - 15.0) + 10.0)
+}
 
 #[no_mangle]
 pub extern fn rast_draw(shade_per_pixel: i32,
@@ -592,14 +613,37 @@ pub extern fn rast_draw(shade_per_pixel: i32,
         Scene::Sphere |
         Scene::TorusKnot  => shader_n_to_color,
         Scene::CornellBox => shader_color,
-        Scene::Head       => shader_dir_light_ao
+        Scene::Head       => shader_dir_light_ao,
+        Scene::Killeroo   => shader_color,
+        Scene::Hand       => shader_color,
+        Scene::Cat        => shader_color
     };
     let eye = match scene {
         Scene::Cube   |
         Scene::Sphere |
-        Scene::Head   |
-        Scene::TorusKnot  => Pnt3::new(
-            (tick.cos() * 2.0) as f32, 0.0, (tick.sin() * 2.0) as f32),
+        Scene::TorusKnot => Pnt3::new(
+            ((tick / 1.25).cos() * 1.8) as f32, 0.0, ((tick / 1.25).sin() * 1.8) as f32),
+        Scene::Head |
+        Scene::Hand |
+        Scene::Cat => Pnt3::new(
+            ((tick / 1.25).cos() * 1.6) as f32, 0.0, ((tick / 1.25).sin() * 1.6) as f32),
+        Scene::Killeroo => {
+            let tick_slow = tick / 3.5;
+            let reverse   = tick_slow as i64 % 2 == 1;
+            let tick_f    = if reverse {
+                                1.0 - tick_slow.fract()
+                            } else {
+                                tick_slow.fract()
+                            } as f32;
+            let smooth    = smootherstep(0.0, 1.0, tick_f);
+            let a_weight  = 1.0 - smooth;
+            let b_weight  = smooth;
+            let tick_seg  = -consts::PI / 2.0 -
+                            (-(consts::PI / 6.0) * a_weight + (consts::PI / 6.0) * b_weight);
+            Pnt3::new(tick_seg.cos() as f32,
+                      ((tick / 2.0).sin() * 0.25 + 0.2) as f32,
+                      tick_seg.sin() as f32)
+        }
         Scene::CornellBox => Pnt3::new(
             (tick.cos() * 0.3) as f32, (tick.sin() * 0.3) as f32, -2.0),
     };

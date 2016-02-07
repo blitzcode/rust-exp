@@ -31,7 +31,7 @@ import WrapEnum
 data Mode = Point | Line | Fill
             deriving (Eq, Show, Enum, Bounded)
 
-data Scene = Cube | Sphere | CornellBox | Head | TorusKnot
+data Scene = Cube | Sphere | CornellBox | Head | TorusKnot | Killeroo | Hand | Cat
              deriving (Eq, Show, Enum, Bounded)
 
 data RustRasterizerExperiment = RustRasterizerExperiment

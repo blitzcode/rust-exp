@@ -37,19 +37,6 @@ lazy_static! {
     };
 }
 
-fn load_hdr(file_name: &String) -> image::Image<f32> {
-    // Load a Radiance HDR image using the stb_image library
-    let path = path::Path::new(file_name);
-    if !path.exists() {
-        panic!("HDR loading: file not found: {}", file_name)
-    }
-    match image::load(path) {
-        image::LoadResult::ImageF32(img) => img,
-        image::LoadResult::ImageU8(_)    => panic!("HDR loading: not HDR: {}", file_name),
-        image::LoadResult::Error(err)    => panic!("HDR loading: {}: {}", err, file_name)
-    }
-}
-
 #[derive(Clone, Copy)]
 struct Vertex {
     p:   Pnt3<f32>,
@@ -352,6 +339,134 @@ fn load_mesh(file_name: &String, mesh_file_type: MeshFileType) -> Mesh {
 #[no_mangle]
 pub extern fn rast_get_mesh_tri_cnt(scene: Scene) -> i32 {
     mesh_from_enum(scene).tri.len() as i32
+}
+
+lazy_static! {
+    // static ref CM_GRACE_COS_1:   CubeMap = { load_cube_map(1,   &"data/grace".to_string()) };
+    // static ref CM_GRACE_COS_8:   CubeMap = { load_cube_map(8,   &"data/grace".to_string()) };
+    // static ref CM_GRACE_COS_64:  CubeMap = { load_cube_map(64,  &"data/grace".to_string()) };
+    static ref CM_GRACE_COS_512: CubeMap = { load_cube_map(512, &"data/grace".to_string()) };
+}
+
+fn load_hdr(file_name: &String) -> image::Image<f32> {
+    // Load a Radiance HDR image using the stb_image library
+    let path = path::Path::new(file_name);
+    if !path.exists() {
+        panic!("load_hdr(): File not found: {}", file_name)
+    }
+    match image::load(path) {
+        image::LoadResult::ImageF32(img) => img,
+        image::LoadResult::ImageU8(_)    => panic!("load_hdr(): Not HDR: {}", file_name),
+        image::LoadResult::Error(err)    => panic!("load_hdr(): {}: {}", err, file_name)
+    }
+}
+
+#[derive(PartialEq, Debug, Copy, Clone)]
+enum CubeMapFaceName { XPos, XNeg, YPos, YNeg, ZPos, ZNeg }
+
+fn file_name_from_face_power(path: &String, power: i32, face: CubeMapFaceName) -> String {
+    // Construct a file name like 'data/env_cos_64_x+.hdr' from the given parameters
+
+    let face_name = match face  {
+        CubeMapFaceName::XPos => "x+",
+        CubeMapFaceName::XNeg => "x-",
+        CubeMapFaceName::YPos => "y+",
+        CubeMapFaceName::YNeg => "y-",
+        CubeMapFaceName::ZPos => "z+",
+        CubeMapFaceName::ZNeg => "z-"
+    }.to_string();
+
+    format!("{}/env_cos_{}_{}.hdr", path, power, face_name)
+}
+
+// All our irradiance cube map faces have the same fixed dimensions
+static CM_FACE_WDH: i32 = 64;
+
+type CubeMapFace = Vec<Vec3<f32>>;
+type CubeMap     = [CubeMapFace; 6];
+
+fn load_cube_map_face(file_name: &String) -> CubeMapFace {
+    // Load HDR
+    let img = load_hdr(&file_name);
+    if img.width  != CM_FACE_WDH as usize ||
+       img.height != CM_FACE_WDH as usize {
+        panic!("load_cube_map_face(): HDR image has wrong cube map face dimensions: {}: {} x {}",
+              file_name, img.width, img.height);
+       }
+
+    // Convert to our format
+    let mut face = Vec::new();
+    face.resize((CM_FACE_WDH * CM_FACE_WDH) as usize, na::zero());
+    for y in 0..CM_FACE_WDH {
+        for x in 0..CM_FACE_WDH {
+            face[(x + (CM_FACE_WDH - 1 - y) /* TODO */ * CM_FACE_WDH) as usize] =
+                Vec3::new(img.data[(x * 3 + y * CM_FACE_WDH * 3 + 0) as usize],
+                          img.data[(x * 3 + y * CM_FACE_WDH * 3 + 1) as usize],
+                          img.data[(x * 3 + y * CM_FACE_WDH * 3 + 2) as usize]);
+        }
+    }
+
+    face
+}
+
+fn load_cube_map(power: i32, path: &String) -> CubeMap {
+    // Load all six cube map faces of the given power from the given path
+    let cm = [
+        load_cube_map_face(&file_name_from_face_power(path, power, CubeMapFaceName::XPos)),
+        load_cube_map_face(&file_name_from_face_power(path, power, CubeMapFaceName::XNeg)),
+        load_cube_map_face(&file_name_from_face_power(path, power, CubeMapFaceName::YPos)),
+        load_cube_map_face(&file_name_from_face_power(path, power, CubeMapFaceName::YNeg)),
+        load_cube_map_face(&file_name_from_face_power(path, power, CubeMapFaceName::ZPos)),
+        load_cube_map_face(&file_name_from_face_power(path, power, CubeMapFaceName::ZNeg))
+    ];
+    println!("load_cube_map_face(): Loaded six {}x{} cube map faces of cos^{} convolved \
+             irradiance from '{}'",
+             CM_FACE_WDH, CM_FACE_WDH, power, path);
+    cm
+}
+
+fn debug_draw_cm(w: i32, h: i32, fb: *mut u32) {
+    // TODO...
+
+    let faces = [
+        CubeMapFaceName::XPos, CubeMapFaceName::XNeg,
+        CubeMapFaceName::YPos, CubeMapFaceName::YNeg,
+        CubeMapFaceName::ZPos, CubeMapFaceName::ZNeg
+    ];
+
+    for face in faces.iter() {
+        let cm = &CM_GRACE_COS_512[*face as usize];
+        let (xoff, yoff) = match face {
+            /*
+            &CubeMapFaceName::XPos => (128,   64 ),
+            &CubeMapFaceName::XNeg => (0,  64 ),
+            &CubeMapFaceName::YPos => (64, 128 ),
+            &CubeMapFaceName::YNeg => (64,   0),
+            &CubeMapFaceName::ZPos => (192,  64),
+            &CubeMapFaceName::ZNeg => (64, 64)
+            */
+            &CubeMapFaceName::XPos => (128, 128),
+            &CubeMapFaceName::XNeg => (0, 128),
+            &CubeMapFaceName::YPos => (64, 192),
+            &CubeMapFaceName::YNeg => (64, 64),
+            &CubeMapFaceName::ZPos => (64, 0),
+            &CubeMapFaceName::ZNeg => (64, 128)
+        };
+
+        for yf in 0..CM_FACE_WDH {
+            for xf in 0..CM_FACE_WDH {
+                let x = xf + xoff;
+                let y = yf + yoff;
+                let col = cm[(xf + yf * CM_FACE_WDH) as usize] * 2500.0;
+
+                if x < 0 || x >= w || y < 0 || y >= h { continue }
+
+                unsafe {
+                    * fb.offset((x + y * w) as isize) = rgbf_to_abgr32(col.x, col.y, col.z);
+                }
+            }
+        }
+    }
 }
 
 // The camera related functions in nalgebra like Iso3::look_at_z() and PerspMat3::new()
@@ -671,9 +786,9 @@ fn build_scene<'a>(scene: Scene, tick: f64) -> (&'a Mesh, Shader, Pnt3<f32>) {
     let shader: Shader = match scene {
         Scene::Cube       => shader_color,
         Scene::Sphere     => shader_n_to_color,
-        Scene::TorusKnot  => shader_n_to_color,
         Scene::CornellBox => shader_color,
         Scene::Head       => shader_dir_light_ao,
+        Scene::TorusKnot  => shader_n_to_color,
         Scene::Killeroo   => shader_color,
         Scene::Hand       => shader_color,
         Scene::Cat        => shader_dir_light_ao
@@ -717,7 +832,7 @@ fn build_scene<'a>(scene: Scene, tick: f64) -> (&'a Mesh, Shader, Pnt3<f32>) {
         }
 
         Scene::CornellBox =>
-            // Camera makes circular motion in front of the box (which is backwards)
+            // Camera makes circular motion looking at the box (which is open at the back)
             Pnt3::new((tick.cos() * 0.3) as f32,
                       (tick.sin() * 0.3) as f32,
                       -2.0)
@@ -971,5 +1086,7 @@ pub extern fn rast_draw(shade_per_pixel: i32,
             }
         }
     }
+
+    debug_draw_cm(w, h, fb);
 }
 

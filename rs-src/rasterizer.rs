@@ -341,13 +341,6 @@ pub extern fn rast_get_mesh_tri_cnt(scene: Scene) -> i32 {
     mesh_from_enum(scene).tri.len() as i32
 }
 
-lazy_static! {
-    // static ref CM_GRACE_COS_1:   CubeMap = { load_cube_map(1,   &"data/grace".to_string()) };
-    // static ref CM_GRACE_COS_8:   CubeMap = { load_cube_map(8,   &"data/grace".to_string()) };
-    // static ref CM_GRACE_COS_64:  CubeMap = { load_cube_map(64,  &"data/grace".to_string()) };
-    static ref CM_GRACE_COS_512: CubeMap = { load_cube_map(512, &"data/grace".to_string()) };
-}
-
 fn load_hdr(file_name: &String) -> image::Image<f32> {
     // Load a Radiance HDR image using the stb_image library
     let path = path::Path::new(file_name);
@@ -361,10 +354,24 @@ fn load_hdr(file_name: &String) -> image::Image<f32> {
     }
 }
 
+lazy_static! {
+     static ref CM_GRACE_COS_0:   CubeMap = { load_cube_map(0,   &"data/grace".to_string()) };
+     static ref CM_GRACE_COS_1:   CubeMap = { load_cube_map(1,   &"data/grace".to_string()) };
+     static ref CM_GRACE_COS_8:   CubeMap = { load_cube_map(8,   &"data/grace".to_string()) };
+     static ref CM_GRACE_COS_64:  CubeMap = { load_cube_map(64,  &"data/grace".to_string()) };
+     static ref CM_GRACE_COS_512: CubeMap = { load_cube_map(512, &"data/grace".to_string()) };
+}
+
+// All our irradiance cube map faces have the same fixed dimensions
+static CM_FACE_WDH: i32 = 64;
+
 #[derive(PartialEq, Debug, Copy, Clone)]
 enum CubeMapFaceName { XPos, XNeg, YPos, YNeg, ZPos, ZNeg }
 
-fn file_name_from_face_power(path: &String, power: i32, face: CubeMapFaceName) -> String {
+type CubeMapFace = Vec<Vec3<f32>>;
+type CubeMap     = [CubeMapFace; 6];
+
+fn cm_file_name_from_param(path: &String, power: i32, face: CubeMapFaceName) -> String {
     // Construct a file name like 'data/env_cos_64_x+.hdr' from the given parameters
 
     let face_name = match face  {
@@ -379,13 +386,7 @@ fn file_name_from_face_power(path: &String, power: i32, face: CubeMapFaceName) -
     format!("{}/env_cos_{}_{}.hdr", path, power, face_name)
 }
 
-// All our irradiance cube map faces have the same fixed dimensions
-static CM_FACE_WDH: i32 = 64;
-
-type CubeMapFace = Vec<Vec3<f32>>;
-type CubeMap     = [CubeMapFace; 6];
-
-fn load_cube_map_face(file_name: &String) -> CubeMapFace {
+fn load_cm_face(file_name: &String, flip_x: bool, flip_y: bool) -> CubeMapFace {
     // Load HDR
     let img = load_hdr(&file_name);
     if img.width  != CM_FACE_WDH as usize ||
@@ -399,7 +400,8 @@ fn load_cube_map_face(file_name: &String) -> CubeMapFace {
     face.resize((CM_FACE_WDH * CM_FACE_WDH) as usize, na::zero());
     for y in 0..CM_FACE_WDH {
         for x in 0..CM_FACE_WDH {
-            face[(x + (CM_FACE_WDH - 1 - y) /* TODO */ * CM_FACE_WDH) as usize] =
+            face[(if flip_x { CM_FACE_WDH - 1 - x } else { x } +
+                  if flip_y { CM_FACE_WDH - 1 - y } else { y } * CM_FACE_WDH) as usize] =
                 Vec3::new(img.data[(x * 3 + y * CM_FACE_WDH * 3 + 0) as usize],
                           img.data[(x * 3 + y * CM_FACE_WDH * 3 + 1) as usize],
                           img.data[(x * 3 + y * CM_FACE_WDH * 3 + 2) as usize]);
@@ -412,13 +414,29 @@ fn load_cube_map_face(file_name: &String) -> CubeMapFace {
 fn load_cube_map(power: i32, path: &String) -> CubeMap {
     // Load all six cube map faces of the given power from the given path
     let cm = [
-        load_cube_map_face(&file_name_from_face_power(path, power, CubeMapFaceName::XPos)),
-        load_cube_map_face(&file_name_from_face_power(path, power, CubeMapFaceName::XNeg)),
-        load_cube_map_face(&file_name_from_face_power(path, power, CubeMapFaceName::YPos)),
-        load_cube_map_face(&file_name_from_face_power(path, power, CubeMapFaceName::YNeg)),
-        load_cube_map_face(&file_name_from_face_power(path, power, CubeMapFaceName::ZPos)),
-        load_cube_map_face(&file_name_from_face_power(path, power, CubeMapFaceName::ZNeg))
+        /* //  correct for cross display
+        load_cm_face(&cm_file_name_from_param(path, power, CubeMapFaceName::XPos), true , true),
+        load_cm_face(&cm_file_name_from_param(path, power, CubeMapFaceName::XNeg), true , true),
+        load_cm_face(&cm_file_name_from_param(path, power, CubeMapFaceName::YPos), false, false),
+        load_cm_face(&cm_file_name_from_param(path, power, CubeMapFaceName::YNeg), false, false),
+        load_cm_face(&cm_file_name_from_param(path, power, CubeMapFaceName::ZPos), true, true),
+        load_cm_face(&cm_file_name_from_param(path, power, CubeMapFaceName::ZNeg), true , true)
+        */
+        load_cm_face(&cm_file_name_from_param(path, power, CubeMapFaceName::XPos), true , true),
+        load_cm_face(&cm_file_name_from_param(path, power, CubeMapFaceName::XNeg), false , true),
+        load_cm_face(&cm_file_name_from_param(path, power, CubeMapFaceName::YPos), false, false),
+        load_cm_face(&cm_file_name_from_param(path, power, CubeMapFaceName::YNeg), false, true),
+        load_cm_face(&cm_file_name_from_param(path, power, CubeMapFaceName::ZPos), false, true),
+        load_cm_face(&cm_file_name_from_param(path, power, CubeMapFaceName::ZNeg), true , true)
     ];
+    /*
+            GL.TextureCubeMapPositiveX -> V3    1  (-vh) (-vw)
+            GL.TextureCubeMapNegativeX -> V3  (-1) (-vh)   vw
+            GL.TextureCubeMapPositiveY -> V3   vw     1    vh
+            GL.TextureCubeMapNegativeY -> V3   vw   (-1) (-vh)
+            GL.TextureCubeMapPositiveZ -> V3   vw  (-vh)    1
+            GL.TextureCubeMapNegativeZ -> V3 (-vw) (-vh)  (-1)
+    */
     println!("load_cube_map_face(): Loaded six {}x{} cube map faces of cos^{} convolved \
              irradiance from '{}'",
              CM_FACE_WDH, CM_FACE_WDH, power, path);
@@ -435,29 +453,36 @@ fn debug_draw_cm(w: i32, h: i32, fb: *mut u32) {
     ];
 
     for face in faces.iter() {
-        let cm = &CM_GRACE_COS_512[*face as usize];
+        let cm = &CM_GRACE_COS_0[*face as usize];
         let (xoff, yoff) = match face {
-            /*
             &CubeMapFaceName::XPos => (128,   64 ),
             &CubeMapFaceName::XNeg => (0,  64 ),
             &CubeMapFaceName::YPos => (64, 128 ),
             &CubeMapFaceName::YNeg => (64,   0),
             &CubeMapFaceName::ZPos => (192,  64),
             &CubeMapFaceName::ZNeg => (64, 64)
-            */
+            /*
             &CubeMapFaceName::XPos => (128, 128),
             &CubeMapFaceName::XNeg => (0, 128),
             &CubeMapFaceName::YPos => (64, 192),
             &CubeMapFaceName::YNeg => (64, 64),
             &CubeMapFaceName::ZPos => (64, 0),
             &CubeMapFaceName::ZNeg => (64, 128)
+            */
         };
 
         for yf in 0..CM_FACE_WDH {
             for xf in 0..CM_FACE_WDH {
                 let x = xf + xoff;
                 let y = yf + yoff;
-                let col = cm[(xf + yf * CM_FACE_WDH) as usize] * 2500.0;
+                let mut col = cm[(xf + yf * CM_FACE_WDH) as usize];// * 2500.0;
+
+                col.x = col.x.powf(1.0 / 2.2);
+                col.y = col.y.powf(1.0 / 2.2);
+                col.z = col.z.powf(1.0 / 2.2);
+
+                col = col * 1.0;
+
 
                 if x < 0 || x >= w || y < 0 || y >= h { continue }
 
@@ -467,6 +492,59 @@ fn debug_draw_cm(w: i32, h: i32, fb: *mut u32) {
             }
         }
     }
+}
+
+fn lookup_cm(cm: &CubeMap, dir: &Vec3<f32>) -> Vec3<f32> {
+    // Fetch the closest texel pointed at by 'dir' from passed cube map
+
+    let face;
+    let mut u;
+    let mut v;
+    let dir_abs = Vec3::new(dir.x.abs(), dir.y.abs(), dir.z.abs());
+
+    if dir_abs.x > dir_abs.y && dir_abs.x > dir_abs.z  {
+        if dir.x > 0.0  {
+            face = CubeMapFaceName::XPos;
+        } else  {
+            face = CubeMapFaceName::XNeg;
+        }
+        u = dir.z / dir_abs.x;
+        v = dir.y / dir_abs.x;
+    } else if dir_abs.y > dir_abs.x && dir_abs.y > dir_abs.z  {
+        if dir.y > 0.0  {
+            face = CubeMapFaceName::YPos;
+        } else  {
+            face = CubeMapFaceName::YNeg;
+        }
+        u = dir.x / dir_abs.y;
+        v = dir.z / dir_abs.y;
+    } else  {
+        if dir.z > 0.0  {
+            face = CubeMapFaceName::ZPos;
+        } else  {
+            face = CubeMapFaceName::ZNeg;
+        }
+        u = dir.x / dir_abs.z;
+        v = dir.y / dir_abs.z;
+    }
+
+    u = (u + 1.0) * 0.5;
+    v = (v + 1.0) * 0.5;
+
+    let tx = na::clamp((u * CM_FACE_WDH as f32) as i32, 0, CM_FACE_WDH - 1);
+    let ty = na::clamp((v * CM_FACE_WDH as f32) as i32, 0, CM_FACE_WDH - 1);
+
+    let idx = tx + ty * CM_FACE_WDH;
+
+    let mut col = cm[face as usize][idx as usize];
+
+    /*
+    col.x = col.x.powf(1.0 / 2.2);
+    col.y = col.y.powf(1.0 / 2.2);
+    col.z = col.z.powf(1.0 / 2.2);
+    */
+
+    col
 }
 
 // The camera related functions in nalgebra like Iso3::look_at_z() and PerspMat3::new()
@@ -683,6 +761,29 @@ fn shader_dir_light_ao(p: &Vec3<f32>,
     light * occlusion
 }
 
+fn normalize_phong_lobe(power: f32) -> f32
+{
+    (power + 2.0) / 2.0
+}
+
+fn shader_cm_refl(p: &Vec3<f32>,
+                 n: &Vec3<f32>,
+                 col: &Vec3<f32>,
+                 eye: &Pnt3<f32>,
+                 _tick: f64) -> Vec3<f32> {
+    let n   = fast_normalize(n);
+    let eye = *p - *eye.as_vec();
+    let r   = fast_normalize(&reflect(&eye, &n));
+
+    //lookup_cm(&CM_GRACE_COS_8, &r) * normalize_phong_lobe(8.0) * 2.5
+
+    (
+    lookup_cm(&CM_GRACE_COS_1, &n) * 6.0
+    + lookup_cm(&CM_GRACE_COS_8, &r) * normalize_phong_lobe(8.0) * 2.0 * Vec3::new(0.8,0.3,0.3)
+    + lookup_cm(&CM_GRACE_COS_64, &r) * normalize_phong_lobe(64.0) * 2.2 * Vec3::new(0.1,0.3,1.0)
+    )
+    * (*col * *col)
+}
 fn fast_normalize(n: &Vec3<f32>) -> Vec3<f32> {
     // nalgbera doesn't use a reciprocal
     let l = 1.0 / (n.x * n.x + n.y * n.y + n.z * n.z).sqrt();
@@ -783,6 +884,7 @@ fn build_scene<'a>(scene: Scene, tick: f64) -> (&'a Mesh, Shader, Pnt3<f32>) {
 
     let mesh = mesh_from_enum(scene);
 
+    /*
     let shader: Shader = match scene {
         Scene::Cube       => shader_color,
         Scene::Sphere     => shader_n_to_color,
@@ -793,6 +895,9 @@ fn build_scene<'a>(scene: Scene, tick: f64) -> (&'a Mesh, Shader, Pnt3<f32>) {
         Scene::Hand       => shader_color,
         Scene::Cat        => shader_dir_light_ao
     };
+    */
+
+    let shader = shader_cm_refl;
 
     let eye = match scene {
         Scene::Cube   |

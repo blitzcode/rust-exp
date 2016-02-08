@@ -8,6 +8,7 @@ use std::error::Error;
 use std::io::prelude::*;
 use std::f32;
 use std::f32::consts;
+use stb_image::image;
 
 lazy_static! {
     static ref CUBE_MESH: Mesh = {
@@ -34,6 +35,19 @@ lazy_static! {
     static ref CAT_MESH: Mesh = {
         load_mesh(&String::from("data/cat_ao.dat"), MeshFileType::XyzNxNyNzRGB)
     };
+}
+
+fn load_hdr(file_name: &String) -> image::Image<f32> {
+    // Load a Radiance HDR image using the stb_image library
+    let path = path::Path::new(file_name);
+    if !path.exists() {
+        panic!("HDR loading: file not found: {}", file_name)
+    }
+    match image::load(path) {
+        image::LoadResult::ImageF32(img) => img,
+        image::LoadResult::ImageU8(_)    => panic!("HDR loading: not HDR: {}", file_name),
+        image::LoadResult::Error(err)    => panic!("HDR loading: {}: {}", err, file_name)
+    }
 }
 
 #[derive(Clone, Copy)]

@@ -9,6 +9,7 @@ use std::io::prelude::*;
 use std::f32;
 use std::f32::consts;
 use stb_image::image;
+use std::cmp::min;
 
 lazy_static! {
     static ref CUBE_MESH: Mesh = {
@@ -376,27 +377,66 @@ type CMFace = Vec<Vec3<f32>>;
 type CM     = [CMFace; 6];
 
 struct IrradianceCMSet{
-    cos_0:   CM, // Reflection map
-    cos_1:   CM, // Diffuse
-    cos_8:   CM, // Specular pow^x
-    cos_64:  CM, // ..
-    cos_512: CM  // ..
+    cos_0:   CM,       // Reflection map
+    cos_1:   CM,       // Diffuse
+    cos_8:   CM,       // Specular pow^x
+    cos_64:  CM,       // ..
+    cos_512: CM,       // ..
+    cross:   Vec<u32>, // Image of unfolded LDR cube map cross
+    cross_wdh: i32,    // Width of cross
+    cross_hgt: i32     // Height of cross
 }
 
 impl IrradianceCMSet {
     fn from_path(path: &str) -> IrradianceCMSet  {
+        // Build a full irradiance cube map set with preview from the files found in 'pat'
+
         let path = &path.to_string();
+
+        // Low-res reflection map and LDR unfolded image
+        let cos_0 = load_cm(0, path);
+        let (cross, cross_wdh, cross_hgt) = draw_cm_cross_buffer(&cos_0);
+
         IrradianceCMSet {
-            cos_0:   load_cm(0,   path),
-            cos_1:   load_cm(1,   path),
-            cos_8:   load_cm(8,   path),
-            cos_64:  load_cm(64,  path),
-            cos_512: load_cm(512, path)
+            cos_0:     cos_0,
+            cos_1:     load_cm(1,   path),
+            cos_8:     load_cm(8,   path),
+            cos_64:    load_cm(64,  path),
+            cos_512:   load_cm(512, path),
+            cross:     cross,
+            cross_wdh: cross_wdh,
+            cross_hgt: cross_hgt
+        }
+    }
+
+    fn draw_cross(&self, xorg: i32, yorg: i32, w: i32, h: i32, fb: *mut u32) {
+        // Draw the cross image into the given framebuffer
+        for y in 0..self.cross_hgt {
+            for x in 0..self.cross_wdh {
+                let fbx = xorg + x;
+                let fby = yorg + y;
+
+                if fbx < 0 || fbx >= w || fby < 0 || fby >= h { continue }
+
+                let fb_idx = (fbx + fby * w) as isize;
+                let cr_idx = (x + y * self.cross_wdh) as usize;
+
+                // Skip pixels not on the cross (alpha == 0)
+                let c1 = self.cross[cr_idx];
+                if c1 & 0xFF000000 == 0 { continue }
+
+                // Blend
+                unsafe {
+                    let c  = fb.offset(fb_idx);
+                    let c2 = *c;
+                    *c     = avg_abgr32(c1, c2);
+                }
+            }
         }
     }
 }
 
-fn cm_file_name_from_param(path: &String, power: i32, face: CMFaceName) -> String {
+fn cm_fn_from_param(path: &String, power: i32, face: CMFaceName) -> String {
     // Construct a file name like 'data/env_cos_64_x+.hdr' from the given parameters
 
     let face_name = match face  {
@@ -420,7 +460,7 @@ fn load_cm_face(file_name: &String, flip_x: bool, flip_y: bool) -> CMFace {
               file_name, img.width, img.height);
        }
 
-    // Convert to our format
+    // Convert to our format, flip axis as requested
     let mut face = Vec::new();
     face.resize((CM_FACE_WDH * CM_FACE_WDH) as usize, na::zero());
     for y in 0..CM_FACE_WDH {
@@ -438,80 +478,78 @@ fn load_cm_face(file_name: &String, flip_x: bool, flip_y: bool) -> CMFace {
 
 fn load_cm(power: i32, path: &String) -> CM {
     // Load all six cube map faces of the given power from the given path
+
+    // The cube maps we load are oriented like OpenGL expects them, which is actually
+    // rather strange. Flip and mirror so it's convenient for the way we do look ups
     let cm = [
-        /* //  correct for cross display
-        load_cm_face(&cm_file_name_from_param(path, power, CMFaceName::XPos), true , true),
-        load_cm_face(&cm_file_name_from_param(path, power, CMFaceName::XNeg), true , true),
-        load_cm_face(&cm_file_name_from_param(path, power, CMFaceName::YPos), false, false),
-        load_cm_face(&cm_file_name_from_param(path, power, CMFaceName::YNeg), false, false),
-        load_cm_face(&cm_file_name_from_param(path, power, CMFaceName::ZPos), true, true),
-        load_cm_face(&cm_file_name_from_param(path, power, CMFaceName::ZNeg), true , true)
-        */
-        load_cm_face(&cm_file_name_from_param(path, power, CMFaceName::XPos), true , true),
-        load_cm_face(&cm_file_name_from_param(path, power, CMFaceName::XNeg), false, true),
-        load_cm_face(&cm_file_name_from_param(path, power, CMFaceName::YPos), false, false),
-        load_cm_face(&cm_file_name_from_param(path, power, CMFaceName::YNeg), false, true),
-        load_cm_face(&cm_file_name_from_param(path, power, CMFaceName::ZPos), false, true),
-        load_cm_face(&cm_file_name_from_param(path, power, CMFaceName::ZNeg), true , true)
+        load_cm_face(&cm_fn_from_param(path, power, CMFaceName::XPos), true , true ),
+        load_cm_face(&cm_fn_from_param(path, power, CMFaceName::XNeg), false, true ),
+        load_cm_face(&cm_fn_from_param(path, power, CMFaceName::YPos), false, false),
+        load_cm_face(&cm_fn_from_param(path, power, CMFaceName::YNeg), false, true ),
+        load_cm_face(&cm_fn_from_param(path, power, CMFaceName::ZPos), false, true ),
+        load_cm_face(&cm_fn_from_param(path, power, CMFaceName::ZNeg), true , true )
     ];
-    /*
-            GL.TextureCMPositiveX -> V3    1  (-vh) (-vw)
-            GL.TextureCMNegativeX -> V3  (-1) (-vh)   vw
-            GL.TextureCMPositiveY -> V3   vw     1    vh
-            GL.TextureCMNegativeY -> V3   vw   (-1) (-vh)
-            GL.TextureCMPositiveZ -> V3   vw  (-vh)    1
-            GL.TextureCMNegativeZ -> V3 (-vw) (-vh)  (-1)
-    */
-    println!("load_cm_face(): Loaded six {}x{} cube map faces of cos^{} convolved \
-             irradiance from '{}'",
+
+    println!("load_cm(): Loaded 6x{}x{} cube map faces of cos^{} convolved irradiance from '{}'",
              CM_FACE_WDH, CM_FACE_WDH, power, path);
+
     cm
 }
 
-fn debug_draw_cm(w: i32, h: i32, fb: *mut u32) {
+fn draw_cm_cross_buffer(cm: &CM) -> (Vec<u32>, i32, i32) {
+    // Draw a flattened out cube map into a buffer, faces are half size
+    //
+    //        _         _  (cross_wdh, cross_hgt)
+    //       |   Y+      |
+    //        X- Z- X+ Z+
+    //       |_  Y-     _|
+    // (0,0)
+    //
+
     let faces = [
         CMFaceName::XPos, CMFaceName::XNeg,
         CMFaceName::YPos, CMFaceName::YNeg,
         CMFaceName::ZPos, CMFaceName::ZNeg
     ];
 
-    for face in faces.iter() {
-        let cm = &_CM_DOGE.cos_0[*face as usize];
-        let (xoff, yoff, flip_x, flip_y) = match face {
-            &CMFaceName::XPos => (128, 64 , false, false),
-            &CMFaceName::XNeg => (0  , 64 , true , false),
-            &CMFaceName::YPos => (64 , 128, false, false),
-            &CMFaceName::YNeg => (64 , 0  , false, true ),
-            &CMFaceName::ZPos => (192, 64 , true , false),
-            &CMFaceName::ZNeg => (64 , 64 , false, false)
+    let     cross_wdh = 4 * (CM_FACE_WDH / 2);
+    let     cross_hgt = 3 * (CM_FACE_WDH / 2);
+    let mut cross     = Vec::new();
+    cross.resize((cross_wdh * cross_hgt) as usize, 0);
+
+    for face_idx in faces.iter() {
+        let face = &cm[*face_idx as usize];
+
+        // Our faces are oriented so we can most efficiently do vector lookups, not
+        // necessarily in the right format for display, so we have to mirror and flip
+        let (xoff, yoff, flip_x, flip_y) = match face_idx {
+            &CMFaceName::XPos => (2, 1, false, false),
+            &CMFaceName::XNeg => (0, 1, true , false),
+            &CMFaceName::YPos => (1, 2, false, false),
+            &CMFaceName::YNeg => (1, 0, false, true ),
+            &CMFaceName::ZPos => (3, 1, true , false),
+            &CMFaceName::ZNeg => (1, 1, false, false)
         };
 
-        let scrn_off_x = 10;
-        let scrn_off_y = 10;
+        let wdh_half = CM_FACE_WDH / 2;
 
-        for yf in 0..CM_FACE_WDH {
-            for xf in 0..CM_FACE_WDH {
-                let x = (xf + xoff) / 2 + scrn_off_x;
-                let y = (yf + yoff) / 2 + scrn_off_y;
-                let mut col = cm[(
-                    if flip_x { CM_FACE_WDH - 1 - xf } else { xf } +
-                    if flip_y { CM_FACE_WDH - 1 - yf } else { yf } * CM_FACE_WDH) as usize];
+        for yf in 0..wdh_half {
+            for xf in 0..wdh_half {
+                let x = xf + xoff * wdh_half;
+                let y = yf + yoff * wdh_half;
+                let col = face[(
+                    if flip_x { wdh_half - 1 - xf } else { xf } * 2 +
+                    if flip_y { wdh_half - 1 - yf } else { yf } * 2 * CM_FACE_WDH) as usize];
 
-                col.x = col.x.powf(1.0 / 2.2);
-                col.y = col.y.powf(1.0 / 2.2);
-                col.z = col.z.powf(1.0 / 2.2);
+                let idx = (x + y * cross_wdh) as usize;
 
-                col = col * 1.0;
-
-
-                if x < 0 || x >= w || y < 0 || y >= h { continue }
-
-                unsafe {
-                    * fb.offset((x + y * w) as isize) = rgbf_to_abgr32(col.x, col.y, col.z);
-                }
+                // We later use the alpha channel to skip pixels outside the cross
+                cross[idx] = rgbf_to_abgr32(col.x, col.y, col.z) | 0xFF000000;
             }
         }
     }
+
+    (cross, cross_wdh, cross_hgt)
 }
 
 fn lookup_cm(cm: &CM, dir: &Vec3<f32>) -> Vec3<f32> {
@@ -796,11 +834,10 @@ fn shader_cm_refl(p: &Vec3<f32>,
     let r   = fast_normalize(&reflect(&eye, &n));
 
     // lookup_cm(&_CM_GRACE.cos_1, &n) * 5.0 * *col
-
     (
-      lookup_cm(&_CM_DOGE.cos_1,  &n) * 6.0
-    + lookup_cm(&_CM_DOGE.cos_8,  &r) * normalize_phong_lobe(8.0 ) * 2.0
-    + lookup_cm(&_CM_DOGE.cos_64, &r) * normalize_phong_lobe(64.0) * 2.2
+      lookup_cm(&_CM_GRACE.cos_1,  &n) * 6.0
+    + lookup_cm(&_CM_GRACE.cos_8,  &r) * normalize_phong_lobe(8.0 ) * 2.0
+    //+ lookup_cm(&_CM_GRACE.cos_512, &r) * normalize_phong_lobe(512.0) * 2.2
     )
     * (*col * *col)
 }
@@ -971,6 +1008,11 @@ fn rgbf_to_abgr32(r: f32, g: f32, b: f32) -> u32 {
     let g8 = (na::clamp(g, 0.0, 1.0) * 255.0) as u32;
     let b8 = (na::clamp(b, 0.0, 1.0) * 255.0) as u32;
     r8 | (g8 << 8) | (b8 << 16)
+}
+
+fn avg_abgr32(c1: u32, c2: u32) -> u32 {
+    // Clever averaging of bytes in two words, see http://tinyurl.com/jzldn9e
+    (((c1 ^ c2) >> 1) & 0x7F7F7F7F) + (c1 & c2)
 }
 
 #[repr(i32)]
@@ -1212,6 +1254,6 @@ pub extern fn rast_draw(shade_per_pixel: i32,
         }
     }
 
-    debug_draw_cm(w, h, fb);
+    _CM_GRACE.draw_cross(10, 10 /*h - 3 * 12 - 10 - _CM_GRACE.cross_hgt*/, w, h, fb);
 }
 

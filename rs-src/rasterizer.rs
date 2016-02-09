@@ -11,14 +11,14 @@ use std::f32::consts;
 use stb_image::image;
 
 lazy_static! {
-  static ref CUBE_MESH: Mesh = load_mesh("data/cube.dat", MeshFileType::XyzNxNyNzRGB);
-  static ref SPHERE_MESH: Mesh = load_mesh("data/sphere.dat", MeshFileType::XyzNxNyNz);
-  static ref CORNELL_MESH: Mesh = load_mesh("data/cornell_radiosity.dat", MeshFileType::XyzRGB);
-  static ref HEAD_MESH: Mesh = load_mesh("data/head_ao.dat", MeshFileType::XyzNxNyNzRGB);
-  static ref TORUS_KNOT_MESH: Mesh = load_mesh("data/torus_knot.dat", MeshFileType::XyzNxNyNz);
-  static ref KILLEROO_MESH: Mesh = load_mesh("data/killeroo_ao.dat", MeshFileType::XyzNxNyNzRGB);
-  static ref HAND_MESH: Mesh = load_mesh("data/hand_ao.dat", MeshFileType::XyzNxNyNzRGB);
-  static ref CAT_MESH: Mesh = load_mesh("data/cat_ao.dat", MeshFileType::XyzNxNyNzRGB);
+  static ref CUBE_MESH: Mesh = load_mesh("meshes/cube.dat", MeshFileType::XyzNxNyNzRGB);
+  static ref SPHERE_MESH: Mesh = load_mesh("meshes/sphere.dat", MeshFileType::XyzNxNyNz);
+  static ref CORNELL_MESH: Mesh = load_mesh("meshes/cornell_radiosity.dat", MeshFileType::XyzRGB);
+  static ref HEAD_MESH: Mesh = load_mesh("meshes/head_ao.dat", MeshFileType::XyzNxNyNzRGB);
+  static ref TORUS_KNOT_MESH: Mesh = load_mesh("meshes/torus_knot.dat", MeshFileType::XyzNxNyNz);
+  static ref KILLEROO_MESH: Mesh = load_mesh("meshes/killeroo_ao.dat", MeshFileType::XyzNxNyNzRGB);
+  static ref HAND_MESH: Mesh = load_mesh("meshes/hand_ao.dat", MeshFileType::XyzNxNyNzRGB);
+  static ref CAT_MESH: Mesh = load_mesh("meshes/cat_ao.dat", MeshFileType::XyzNxNyNzRGB);
 }
 
 #[derive(Clone, Copy)]
@@ -342,14 +342,14 @@ fn load_hdr(file_name: &String) -> image::Image<f32> {
 
 // Sets of pre-filtered irradiance cube maps
 lazy_static! {
-    static ref _CM_GRACE:       IrradianceCMSet = IrradianceCMSet::from_path("data/grace"      );
-    static ref _CM_PARKING_LOT: IrradianceCMSet = IrradianceCMSet::from_path("data/parking_lot");
-    static ref _CM_ENIS:        IrradianceCMSet = IrradianceCMSet::from_path("data/enis"       );
-    static ref _CM_GLACIER:     IrradianceCMSet = IrradianceCMSet::from_path("data/glacier"    );
-    static ref _CM_PISA:        IrradianceCMSet = IrradianceCMSet::from_path("data/pisa"       );
-    static ref _CM_PINE_TREE:   IrradianceCMSet = IrradianceCMSet::from_path("data/pine_tree"  );
-    static ref _CM_UFFIZI:      IrradianceCMSet = IrradianceCMSet::from_path("data/uffizi"     );
-    static ref _CM_DOGE:        IrradianceCMSet = IrradianceCMSet::from_path("data/doge"       );
+  static ref _CM_GRACE:       IrradianceCMSet = IrradianceCMSet::from_path("envmaps/grace"      );
+  static ref _CM_PARKING_LOT: IrradianceCMSet = IrradianceCMSet::from_path("envmaps/parking_lot");
+  static ref _CM_ENIS:        IrradianceCMSet = IrradianceCMSet::from_path("envmaps/enis"       );
+  static ref _CM_GLACIER:     IrradianceCMSet = IrradianceCMSet::from_path("envmaps/glacier"    );
+  static ref _CM_PISA:        IrradianceCMSet = IrradianceCMSet::from_path("envmaps/pisa"       );
+  static ref _CM_PINE_TREE:   IrradianceCMSet = IrradianceCMSet::from_path("envmaps/pine_tree"  );
+  static ref _CM_UFFIZI:      IrradianceCMSet = IrradianceCMSet::from_path("envmaps/uffizi"     );
+  static ref _CM_DOGE:        IrradianceCMSet = IrradianceCMSet::from_path("envmaps/doge"       );
 }
 
 // All our irradiance cube map faces have the same fixed dimensions

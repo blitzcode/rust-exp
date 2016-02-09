@@ -1,0 +1,10 @@
+
+The environment map convolutions in the sub-directories here are derived from files
+downloaded from the following sources:
+
+http://gl.ict.usc.edu/Data/HighResProbes/
+http://www.hdrlabs.com/sibl/archive.html
+http://www.hdri-hub.com/free-hdri-environments-for-download
+
+(C) original authors
+

@@ -47,7 +47,7 @@ makeLenses ''RustRasterizerExperiment
 instance Experiment RustRasterizerExperiment where
     withExperiment f = do f $ RustRasterizerExperiment { _rrTimes         = BS.empty 60
                                                        , _rrBgType        = 0
-                                                       , _rrScene         = Head
+                                                       , _rrScene         = Killeroo
                                                        , _rrMode          = Fill
                                                        , _rrShadePerPixel = False
                                                        }

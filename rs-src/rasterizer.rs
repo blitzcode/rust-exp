@@ -809,7 +809,7 @@ fn shader_cm_refl(p: &Vec3<f32>,
                  _tick: f64) -> Vec3<f32> {
     let n   = fast_normalize(n);
     let eye = *p - *eye.as_vec();
-    let r   = fast_normalize(&reflect(&eye, &n));
+    let r   = &reflect(&eye, &n);
 
     // lookup_cm(&_CM_GRACE.cos_1, &n) * 5.0 * *col
     (
@@ -819,6 +819,7 @@ fn shader_cm_refl(p: &Vec3<f32>,
     )
     * (*col * *col)
 }
+
 fn fast_normalize(n: &Vec3<f32>) -> Vec3<f32> {
     // nalgbera doesn't use a reciprocal
     let l = 1.0 / (n.x * n.x + n.y * n.y + n.z * n.z).sqrt();
@@ -1035,8 +1036,8 @@ pub extern fn rast_draw(shade_per_pixel: i32,
             for t in &mesh.tri {
                 for idx in &[t.v0, t.v1, t.v2] {
                     let vp = &vtx_transf[*idx as usize].vp;
-                    let x    = vp.x as i32;
-                    let y    = vp.y as i32;
+                    let x  = vp.x as i32;
+                    let y  = vp.y as i32;
 
                     if x < 0 || x >= w || y < 0 || y >= h { continue }
 

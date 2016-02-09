@@ -68,7 +68,7 @@ main = do
                 as = AppState { _asLastEscPress   = -1
                               , _asFrameTimes     = BS.empty 60 -- Average over last N FPS
                               , _asFrameIdx       = 0
-                              , _asVSync          = True
+                              , _asVSync          = False
                               , _asExperiment     = AnyExperiment emptyExperiment
                               , _asExperimentDesc = ""
                               , ..

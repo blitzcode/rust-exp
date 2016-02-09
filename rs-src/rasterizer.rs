@@ -9,33 +9,16 @@ use std::io::prelude::*;
 use std::f32;
 use std::f32::consts;
 use stb_image::image;
-use std::cmp::min;
 
 lazy_static! {
-    static ref CUBE_MESH: Mesh = {
-        load_mesh(&String::from("data/cube.dat"), MeshFileType::XyzNxNyNzRGB)
-    };
-    static ref SPHERE_MESH: Mesh = {
-        load_mesh(&String::from("data/sphere.dat"), MeshFileType::XyzNxNyNz)
-    };
-    static ref CORNELL_MESH: Mesh = {
-        load_mesh(&String::from("data/cornell_radiosity.dat"), MeshFileType::XyzRGB)
-    };
-    static ref HEAD_MESH: Mesh = {
-        load_mesh(&String::from("data/head_ao.dat"), MeshFileType::XyzNxNyNzRGB)
-    };
-    static ref TORUS_KNOT_MESH: Mesh = {
-        load_mesh(&String::from("data/torus_knot.dat"), MeshFileType::XyzNxNyNz)
-    };
-    static ref KILLEROO_MESH: Mesh = {
-        load_mesh(&String::from("data/killeroo_ao.dat"), MeshFileType::XyzNxNyNzRGB)
-    };
-    static ref HAND_MESH: Mesh = {
-        load_mesh(&String::from("data/hand_ao.dat"), MeshFileType::XyzNxNyNzRGB)
-    };
-    static ref CAT_MESH: Mesh = {
-        load_mesh(&String::from("data/cat_ao.dat"), MeshFileType::XyzNxNyNzRGB)
-    };
+  static ref CUBE_MESH: Mesh = load_mesh("data/cube.dat", MeshFileType::XyzNxNyNzRGB);
+  static ref SPHERE_MESH: Mesh = load_mesh("data/sphere.dat", MeshFileType::XyzNxNyNz);
+  static ref CORNELL_MESH: Mesh = load_mesh("data/cornell_radiosity.dat", MeshFileType::XyzRGB);
+  static ref HEAD_MESH: Mesh = load_mesh("data/head_ao.dat", MeshFileType::XyzNxNyNzRGB);
+  static ref TORUS_KNOT_MESH: Mesh = load_mesh("data/torus_knot.dat", MeshFileType::XyzNxNyNz);
+  static ref KILLEROO_MESH: Mesh = load_mesh("data/killeroo_ao.dat", MeshFileType::XyzNxNyNzRGB);
+  static ref HAND_MESH: Mesh = load_mesh("data/hand_ao.dat", MeshFileType::XyzNxNyNzRGB);
+  static ref CAT_MESH: Mesh = load_mesh("data/cat_ao.dat", MeshFileType::XyzNxNyNzRGB);
 }
 
 #[derive(Clone, Copy)]
@@ -142,8 +125,10 @@ fn face_normal(v0: &Pnt3<f32>, v1: &Pnt3<f32>, v2: &Pnt3<f32>) -> Vec3<f32> {
 #[derive(PartialEq, Debug)]
 enum MeshFileType { XyzNxNyNz, XyzNxNyNzRGB, XyzRGB }
 
-fn load_mesh(file_name: &String, mesh_file_type: MeshFileType) -> Mesh {
+fn load_mesh(file_name: &str, mesh_file_type: MeshFileType) -> Mesh {
     // Load a text format mesh from disk
+
+    let file_name = &file_name.to_string();
 
     let path    = path::Path::new(file_name);
     let display = path.display();
@@ -377,21 +362,25 @@ type CMFace = Vec<Vec3<f32>>;
 type CM     = [CMFace; 6];
 
 struct IrradianceCMSet{
-    cos_0:   CM,       // Reflection map
-    cos_1:   CM,       // Diffuse
-    cos_8:   CM,       // Specular pow^x
-    cos_64:  CM,       // ..
-    cos_512: CM,       // ..
-    cross:   Vec<u32>, // Image of unfolded LDR cube map cross
-    cross_wdh: i32,    // Width of cross
-    cross_hgt: i32     // Height of cross
+    cos_0:     CM,       // Reflection map
+    cos_1:     CM,       // Diffuse
+    cos_8:     CM,       // Specular pow^x
+    cos_64:    CM,       // ..
+    cos_512:   CM,       // ..
+    cross:     Vec<u32>, // Image of unfolded LDR cube map cross
+    cross_wdh: i32,      // Width of cross
+    cross_hgt: i32       // Height of cross
 }
 
 impl IrradianceCMSet {
     fn from_path(path: &str) -> IrradianceCMSet  {
-        // Build a full irradiance cube map set with preview from the files found in 'pat'
+        // Build a full irradiance cube map set with preview from the files found in 'path'
 
         let path = &path.to_string();
+
+        println!("IrradianceCMSet::from_path(): Loading 5x6x{}x{} cube map faces of \
+                 cos^[0|1|8|64|512] convolved irradiance from '{}'",
+                 CM_FACE_WDH, CM_FACE_WDH, path);
 
         // Low-res reflection map and LDR unfolded image
         let cos_0 = load_cm(0, path);
@@ -480,7 +469,7 @@ fn load_cm(power: i32, path: &String) -> CM {
     // Load all six cube map faces of the given power from the given path
 
     // The cube maps we load are oriented like OpenGL expects them, which is actually
-    // rather strange. Flip and mirror so it's convenient for the way we do look ups
+    // rather strange. Flip and mirror so it's convenient for the way we do lookups
     let cm = [
         load_cm_face(&cm_fn_from_param(path, power, CMFaceName::XPos), true , true ),
         load_cm_face(&cm_fn_from_param(path, power, CMFaceName::XNeg), false, true ),
@@ -489,9 +478,6 @@ fn load_cm(power: i32, path: &String) -> CM {
         load_cm_face(&cm_fn_from_param(path, power, CMFaceName::ZPos), false, true ),
         load_cm_face(&cm_fn_from_param(path, power, CMFaceName::ZNeg), true , true )
     ];
-
-    println!("load_cm(): Loaded 6x{}x{} cube map faces of cos^{} convolved irradiance from '{}'",
-             CM_FACE_WDH, CM_FACE_WDH, power, path);
 
     cm
 }
@@ -594,15 +580,7 @@ fn lookup_cm(cm: &CM, dir: &Vec3<f32>) -> Vec3<f32> {
 
     let idx = tx + ty * CM_FACE_WDH;
 
-    let mut col = cm[face as usize][idx as usize];
-
-    /*
-    col.x = col.x.powf(1.0 / 2.2);
-    col.y = col.y.powf(1.0 / 2.2);
-    col.z = col.z.powf(1.0 / 2.2);
-    */
-
-    col
+    cm[face as usize][idx as usize]
 }
 
 // The camera related functions in nalgebra like Iso3::look_at_z() and PerspMat3::new()
@@ -941,20 +919,16 @@ fn build_scene<'a>(scene: Scene, tick: f64) -> (&'a Mesh, Shader, Pnt3<f32>) {
 
     let mesh = mesh_from_enum(scene);
 
-    /*
     let shader: Shader = match scene {
         Scene::Cube       => shader_color,
         Scene::Sphere     => shader_n_to_color,
         Scene::CornellBox => shader_color,
         Scene::Head       => shader_dir_light_ao,
-        Scene::TorusKnot  => shader_n_to_color,
-        Scene::Killeroo   => shader_color,
+        Scene::TorusKnot  => shader_cm_refl,
+        Scene::Killeroo   => shader_cm_refl,
         Scene::Hand       => shader_color,
         Scene::Cat        => shader_dir_light_ao
     };
-    */
-
-    let shader = shader_cm_refl;
 
     let eye = match scene {
         Scene::Cube   |
@@ -1254,6 +1228,7 @@ pub extern fn rast_draw(shade_per_pixel: i32,
         }
     }
 
-    _CM_GRACE.draw_cross(10, 10 /*h - 3 * 12 - 10 - _CM_GRACE.cross_hgt*/, w, h, fb);
+    // Cube map unfolded LDR preview overlay
+    _CM_GRACE.draw_cross(10, 10, w, h, fb);
 }
 

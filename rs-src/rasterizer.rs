@@ -354,44 +354,69 @@ fn load_hdr(file_name: &String) -> image::Image<f32> {
     }
 }
 
+// Sets of pre-filtered irradiance cube maps
 lazy_static! {
-     static ref CM_GRACE_COS_0:   CubeMap = { load_cube_map(0,   &"data/grace".to_string()) };
-     static ref CM_GRACE_COS_1:   CubeMap = { load_cube_map(1,   &"data/grace".to_string()) };
-     static ref CM_GRACE_COS_8:   CubeMap = { load_cube_map(8,   &"data/grace".to_string()) };
-     static ref CM_GRACE_COS_64:  CubeMap = { load_cube_map(64,  &"data/grace".to_string()) };
-     static ref CM_GRACE_COS_512: CubeMap = { load_cube_map(512, &"data/grace".to_string()) };
+    static ref _CM_GRACE:       IrradianceCMSet = IrradianceCMSet::from_path("data/grace"      );
+    static ref _CM_PARKING_LOT: IrradianceCMSet = IrradianceCMSet::from_path("data/parking_lot");
+    static ref _CM_ENIS:        IrradianceCMSet = IrradianceCMSet::from_path("data/enis"       );
+    static ref _CM_GLACIER:     IrradianceCMSet = IrradianceCMSet::from_path("data/glacier"    );
+    static ref _CM_PISA:        IrradianceCMSet = IrradianceCMSet::from_path("data/pisa"       );
+    static ref _CM_PINE_TREE:   IrradianceCMSet = IrradianceCMSet::from_path("data/pine_tree"  );
+    static ref _CM_UFFIZI:      IrradianceCMSet = IrradianceCMSet::from_path("data/uffizi"     );
+    static ref _CM_DOGE:        IrradianceCMSet = IrradianceCMSet::from_path("data/doge"       );
 }
 
 // All our irradiance cube map faces have the same fixed dimensions
 static CM_FACE_WDH: i32 = 64;
 
 #[derive(PartialEq, Debug, Copy, Clone)]
-enum CubeMapFaceName { XPos, XNeg, YPos, YNeg, ZPos, ZNeg }
+enum CMFaceName { XPos, XNeg, YPos, YNeg, ZPos, ZNeg }
 
-type CubeMapFace = Vec<Vec3<f32>>;
-type CubeMap     = [CubeMapFace; 6];
+type CMFace = Vec<Vec3<f32>>;
+type CM     = [CMFace; 6];
 
-fn cm_file_name_from_param(path: &String, power: i32, face: CubeMapFaceName) -> String {
+struct IrradianceCMSet{
+    cos_0:   CM, // Reflection map
+    cos_1:   CM, // Diffuse
+    cos_8:   CM, // Specular pow^x
+    cos_64:  CM, // ..
+    cos_512: CM  // ..
+}
+
+impl IrradianceCMSet {
+    fn from_path(path: &str) -> IrradianceCMSet  {
+        let path = &path.to_string();
+        IrradianceCMSet {
+            cos_0:   load_cm(0,   path),
+            cos_1:   load_cm(1,   path),
+            cos_8:   load_cm(8,   path),
+            cos_64:  load_cm(64,  path),
+            cos_512: load_cm(512, path)
+        }
+    }
+}
+
+fn cm_file_name_from_param(path: &String, power: i32, face: CMFaceName) -> String {
     // Construct a file name like 'data/env_cos_64_x+.hdr' from the given parameters
 
     let face_name = match face  {
-        CubeMapFaceName::XPos => "x+",
-        CubeMapFaceName::XNeg => "x-",
-        CubeMapFaceName::YPos => "y+",
-        CubeMapFaceName::YNeg => "y-",
-        CubeMapFaceName::ZPos => "z+",
-        CubeMapFaceName::ZNeg => "z-"
+        CMFaceName::XPos => "x+",
+        CMFaceName::XNeg => "x-",
+        CMFaceName::YPos => "y+",
+        CMFaceName::YNeg => "y-",
+        CMFaceName::ZPos => "z+",
+        CMFaceName::ZNeg => "z-"
     }.to_string();
 
     format!("{}/env_cos_{}_{}.hdr", path, power, face_name)
 }
 
-fn load_cm_face(file_name: &String, flip_x: bool, flip_y: bool) -> CubeMapFace {
+fn load_cm_face(file_name: &String, flip_x: bool, flip_y: bool) -> CMFace {
     // Load HDR
     let img = load_hdr(&file_name);
     if img.width  != CM_FACE_WDH as usize ||
        img.height != CM_FACE_WDH as usize {
-        panic!("load_cube_map_face(): HDR image has wrong cube map face dimensions: {}: {} x {}",
+        panic!("load_cm_face(): HDR image has wrong cube map face dimensions: {}: {} x {}",
               file_name, img.width, img.height);
        }
 
@@ -411,71 +436,66 @@ fn load_cm_face(file_name: &String, flip_x: bool, flip_y: bool) -> CubeMapFace {
     face
 }
 
-fn load_cube_map(power: i32, path: &String) -> CubeMap {
+fn load_cm(power: i32, path: &String) -> CM {
     // Load all six cube map faces of the given power from the given path
     let cm = [
         /* //  correct for cross display
-        load_cm_face(&cm_file_name_from_param(path, power, CubeMapFaceName::XPos), true , true),
-        load_cm_face(&cm_file_name_from_param(path, power, CubeMapFaceName::XNeg), true , true),
-        load_cm_face(&cm_file_name_from_param(path, power, CubeMapFaceName::YPos), false, false),
-        load_cm_face(&cm_file_name_from_param(path, power, CubeMapFaceName::YNeg), false, false),
-        load_cm_face(&cm_file_name_from_param(path, power, CubeMapFaceName::ZPos), true, true),
-        load_cm_face(&cm_file_name_from_param(path, power, CubeMapFaceName::ZNeg), true , true)
+        load_cm_face(&cm_file_name_from_param(path, power, CMFaceName::XPos), true , true),
+        load_cm_face(&cm_file_name_from_param(path, power, CMFaceName::XNeg), true , true),
+        load_cm_face(&cm_file_name_from_param(path, power, CMFaceName::YPos), false, false),
+        load_cm_face(&cm_file_name_from_param(path, power, CMFaceName::YNeg), false, false),
+        load_cm_face(&cm_file_name_from_param(path, power, CMFaceName::ZPos), true, true),
+        load_cm_face(&cm_file_name_from_param(path, power, CMFaceName::ZNeg), true , true)
         */
-        load_cm_face(&cm_file_name_from_param(path, power, CubeMapFaceName::XPos), true , true),
-        load_cm_face(&cm_file_name_from_param(path, power, CubeMapFaceName::XNeg), false , true),
-        load_cm_face(&cm_file_name_from_param(path, power, CubeMapFaceName::YPos), false, false),
-        load_cm_face(&cm_file_name_from_param(path, power, CubeMapFaceName::YNeg), false, true),
-        load_cm_face(&cm_file_name_from_param(path, power, CubeMapFaceName::ZPos), false, true),
-        load_cm_face(&cm_file_name_from_param(path, power, CubeMapFaceName::ZNeg), true , true)
+        load_cm_face(&cm_file_name_from_param(path, power, CMFaceName::XPos), true , true),
+        load_cm_face(&cm_file_name_from_param(path, power, CMFaceName::XNeg), false, true),
+        load_cm_face(&cm_file_name_from_param(path, power, CMFaceName::YPos), false, false),
+        load_cm_face(&cm_file_name_from_param(path, power, CMFaceName::YNeg), false, true),
+        load_cm_face(&cm_file_name_from_param(path, power, CMFaceName::ZPos), false, true),
+        load_cm_face(&cm_file_name_from_param(path, power, CMFaceName::ZNeg), true , true)
     ];
     /*
-            GL.TextureCubeMapPositiveX -> V3    1  (-vh) (-vw)
-            GL.TextureCubeMapNegativeX -> V3  (-1) (-vh)   vw
-            GL.TextureCubeMapPositiveY -> V3   vw     1    vh
-            GL.TextureCubeMapNegativeY -> V3   vw   (-1) (-vh)
-            GL.TextureCubeMapPositiveZ -> V3   vw  (-vh)    1
-            GL.TextureCubeMapNegativeZ -> V3 (-vw) (-vh)  (-1)
+            GL.TextureCMPositiveX -> V3    1  (-vh) (-vw)
+            GL.TextureCMNegativeX -> V3  (-1) (-vh)   vw
+            GL.TextureCMPositiveY -> V3   vw     1    vh
+            GL.TextureCMNegativeY -> V3   vw   (-1) (-vh)
+            GL.TextureCMPositiveZ -> V3   vw  (-vh)    1
+            GL.TextureCMNegativeZ -> V3 (-vw) (-vh)  (-1)
     */
-    println!("load_cube_map_face(): Loaded six {}x{} cube map faces of cos^{} convolved \
+    println!("load_cm_face(): Loaded six {}x{} cube map faces of cos^{} convolved \
              irradiance from '{}'",
              CM_FACE_WDH, CM_FACE_WDH, power, path);
     cm
 }
 
 fn debug_draw_cm(w: i32, h: i32, fb: *mut u32) {
-    // TODO...
-
     let faces = [
-        CubeMapFaceName::XPos, CubeMapFaceName::XNeg,
-        CubeMapFaceName::YPos, CubeMapFaceName::YNeg,
-        CubeMapFaceName::ZPos, CubeMapFaceName::ZNeg
+        CMFaceName::XPos, CMFaceName::XNeg,
+        CMFaceName::YPos, CMFaceName::YNeg,
+        CMFaceName::ZPos, CMFaceName::ZNeg
     ];
 
     for face in faces.iter() {
-        let cm = &CM_GRACE_COS_0[*face as usize];
-        let (xoff, yoff) = match face {
-            &CubeMapFaceName::XPos => (128,   64 ),
-            &CubeMapFaceName::XNeg => (0,  64 ),
-            &CubeMapFaceName::YPos => (64, 128 ),
-            &CubeMapFaceName::YNeg => (64,   0),
-            &CubeMapFaceName::ZPos => (192,  64),
-            &CubeMapFaceName::ZNeg => (64, 64)
-            /*
-            &CubeMapFaceName::XPos => (128, 128),
-            &CubeMapFaceName::XNeg => (0, 128),
-            &CubeMapFaceName::YPos => (64, 192),
-            &CubeMapFaceName::YNeg => (64, 64),
-            &CubeMapFaceName::ZPos => (64, 0),
-            &CubeMapFaceName::ZNeg => (64, 128)
-            */
+        let cm = &_CM_DOGE.cos_0[*face as usize];
+        let (xoff, yoff, flip_x, flip_y) = match face {
+            &CMFaceName::XPos => (128, 64 , false, false),
+            &CMFaceName::XNeg => (0  , 64 , true , false),
+            &CMFaceName::YPos => (64 , 128, false, false),
+            &CMFaceName::YNeg => (64 , 0  , false, true ),
+            &CMFaceName::ZPos => (192, 64 , true , false),
+            &CMFaceName::ZNeg => (64 , 64 , false, false)
         };
+
+        let scrn_off_x = 10;
+        let scrn_off_y = 10;
 
         for yf in 0..CM_FACE_WDH {
             for xf in 0..CM_FACE_WDH {
-                let x = xf + xoff;
-                let y = yf + yoff;
-                let mut col = cm[(xf + yf * CM_FACE_WDH) as usize];// * 2500.0;
+                let x = (xf + xoff) / 2 + scrn_off_x;
+                let y = (yf + yoff) / 2 + scrn_off_y;
+                let mut col = cm[(
+                    if flip_x { CM_FACE_WDH - 1 - xf } else { xf } +
+                    if flip_y { CM_FACE_WDH - 1 - yf } else { yf } * CM_FACE_WDH) as usize];
 
                 col.x = col.x.powf(1.0 / 2.2);
                 col.y = col.y.powf(1.0 / 2.2);
@@ -494,7 +514,7 @@ fn debug_draw_cm(w: i32, h: i32, fb: *mut u32) {
     }
 }
 
-fn lookup_cm(cm: &CubeMap, dir: &Vec3<f32>) -> Vec3<f32> {
+fn lookup_cm(cm: &CM, dir: &Vec3<f32>) -> Vec3<f32> {
     // Fetch the closest texel pointed at by 'dir' from passed cube map
 
     let face;
@@ -504,25 +524,25 @@ fn lookup_cm(cm: &CubeMap, dir: &Vec3<f32>) -> Vec3<f32> {
 
     if dir_abs.x > dir_abs.y && dir_abs.x > dir_abs.z  {
         if dir.x > 0.0  {
-            face = CubeMapFaceName::XPos;
+            face = CMFaceName::XPos;
         } else  {
-            face = CubeMapFaceName::XNeg;
+            face = CMFaceName::XNeg;
         }
         u = dir.z / dir_abs.x;
         v = dir.y / dir_abs.x;
     } else if dir_abs.y > dir_abs.x && dir_abs.y > dir_abs.z  {
         if dir.y > 0.0  {
-            face = CubeMapFaceName::YPos;
+            face = CMFaceName::YPos;
         } else  {
-            face = CubeMapFaceName::YNeg;
+            face = CMFaceName::YNeg;
         }
         u = dir.x / dir_abs.y;
         v = dir.z / dir_abs.y;
     } else  {
         if dir.z > 0.0  {
-            face = CubeMapFaceName::ZPos;
+            face = CMFaceName::ZPos;
         } else  {
-            face = CubeMapFaceName::ZNeg;
+            face = CMFaceName::ZNeg;
         }
         u = dir.x / dir_abs.z;
         v = dir.y / dir_abs.z;
@@ -775,12 +795,12 @@ fn shader_cm_refl(p: &Vec3<f32>,
     let eye = *p - *eye.as_vec();
     let r   = fast_normalize(&reflect(&eye, &n));
 
-    //lookup_cm(&CM_GRACE_COS_8, &r) * normalize_phong_lobe(8.0) * 2.5
+    // lookup_cm(&_CM_GRACE.cos_1, &n) * 5.0 * *col
 
     (
-    lookup_cm(&CM_GRACE_COS_1, &n) * 6.0
-    + lookup_cm(&CM_GRACE_COS_8, &r) * normalize_phong_lobe(8.0) * 2.0 * Vec3::new(0.8,0.3,0.3)
-    + lookup_cm(&CM_GRACE_COS_64, &r) * normalize_phong_lobe(64.0) * 2.2 * Vec3::new(0.1,0.3,1.0)
+      lookup_cm(&_CM_DOGE.cos_1,  &n) * 6.0
+    + lookup_cm(&_CM_DOGE.cos_8,  &r) * normalize_phong_lobe(8.0 ) * 2.0
+    + lookup_cm(&_CM_DOGE.cos_64, &r) * normalize_phong_lobe(64.0) * 2.2
     )
     * (*col * *col)
 }

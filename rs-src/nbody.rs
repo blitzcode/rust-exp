@@ -525,6 +525,8 @@ pub extern fn nb_draw(w: i32, h: i32, fb: *mut u32) -> () {
         let x = (p.px - x1) * scalex;
         let y = (p.py - y1) * scaley;
 
+        // TODO: Note that we don't gamma correct here at all, not blending in linear space
+
         // Draw semi-transparent particle with slightly more transparent tail
         for i in 0..2 {
             let xo;

@@ -19,6 +19,9 @@ lazy_static! {
   static ref KILLEROO_MESH: Mesh = load_mesh("meshes/killeroo_ao.dat", MeshFileType::XyzNxNyNzRGB);
   static ref HAND_MESH: Mesh = load_mesh("meshes/hand_ao.dat", MeshFileType::XyzNxNyNzRGB);
   static ref CAT_MESH: Mesh = load_mesh("meshes/cat_ao.dat", MeshFileType::XyzNxNyNzRGB);
+  static ref TEAPOT_MESH: Mesh = load_mesh("meshes/teapot.dat", MeshFileType::XyzNxNyNz);
+  static ref DWARF_MESH: Mesh = load_mesh("meshes/dwarf.dat", MeshFileType::XyzNxNyNzRGB);
+  static ref BLOB_MESH: Mesh = load_mesh("meshes/blob.dat", MeshFileType::XyzNxNyNz);
 }
 
 #[derive(Clone, Copy)]
@@ -902,7 +905,10 @@ fn mesh_from_enum<'a>(scene: Scene) -> &'a Mesh {
         Scene::TorusKnot  => &TORUS_KNOT_MESH,
         Scene::Killeroo   => &KILLEROO_MESH,
         Scene::Hand       => &HAND_MESH,
-        Scene::Cat        => &CAT_MESH
+        Scene::Cat        => &CAT_MESH,
+        Scene::Teapot     => &TEAPOT_MESH,
+        Scene::Dwarf      => &DWARF_MESH,
+        Scene::Blob       => &BLOB_MESH
     }
 }
 
@@ -927,13 +933,17 @@ fn build_scene<'a>(scene: Scene, tick: f64) -> (&'a Mesh, Shader, Pnt3<f32>) {
         Scene::TorusKnot  => shader_dir_light_ao,
         Scene::Killeroo   => shader_cm_refl,
         Scene::Hand       => shader_color,
-        Scene::Cat        => shader_dir_light_ao
+        Scene::Cat        => shader_dir_light_ao,
+        Scene::Teapot     => shader_cm_refl,
+        Scene::Dwarf      => shader_cm_refl,
+        Scene::Blob       => shader_dir_light_ao
     };
 
     let eye = match scene {
-        Scene::Cube   |
-        Scene::Sphere |
-        Scene::TorusKnot =>
+        Scene::Cube      |
+        Scene::Sphere    |
+        Scene::TorusKnot |
+        Scene::Blob =>
             // Orbit around object
             Pnt3::new(((tick / 1.25).cos() * 1.8) as f32,
                       0.0,
@@ -941,12 +951,14 @@ fn build_scene<'a>(scene: Scene, tick: f64) -> (&'a Mesh, Shader, Pnt3<f32>) {
 
         Scene::Head |
         Scene::Hand |
-        Scene::Cat =>
+        Scene::Cat  |
+        Scene::Teapot =>
             // Orbit closer around object
             Pnt3::new(((tick / 1.25).cos() * 1.6) as f32,
                       0.0,
                       ((tick / 1.25).sin() * 1.6) as f32),
 
+        Scene::Dwarf |
         Scene::Killeroo => {
             // Slow, dampened pan around the front of the object,
             // some slow vertical bobbing as well
@@ -1154,7 +1166,19 @@ pub enum RenderMode { Point, Line, Fill }
 
 #[repr(i32)]
 #[derive(Copy, Clone)]
-pub enum Scene { Cube, Sphere, CornellBox, Head, TorusKnot, Killeroo, Hand, Cat  }
+pub enum Scene {
+    Cube,
+    Sphere,
+    CornellBox,
+    Head,
+    TorusKnot,
+    Killeroo,
+    Hand,
+    Cat,
+    Teapot,
+    Dwarf,
+    Blob
+}
 
 #[no_mangle]
 pub extern fn rast_draw(shade_per_pixel: i32,

@@ -778,19 +778,19 @@ fn shader_dir_light_ao(p: &Vec3<f32>,
     {
         let ldotn =                 na::clamp(na::dot(&l, &n), 0.0, 1.0);
         let ldotr = fast_unit_pow16(na::clamp(na::dot(&l, &r), 0.0, 1.0));
-        light_1   = ldotn * 0.75 + ldotr;
+        light_1   = ldotn * 0.15 + ldotr * 0.75;
     }
 
     let light_2;
     {
         let ldotn =                 na::clamp(na::dot(&-l, &n), 0.0, 1.0);
         let ldotr = fast_unit_pow16(na::clamp(na::dot(&-l, &r), 0.0, 1.0));
-        light_2   = ldotn * 0.75 + ldotr;
+        light_2   = ldotn * 0.15 + ldotr * 0.75;
     }
 
-    let ambient   = Vec3::new(0.1, 0.1, 0.1);
-    let light     = Vec3::new(1.0, 0.75, 0.75) * light_1 +
-                    Vec3::new(0.75, 1.0, 1.0)  * light_2 +
+    let ambient   = Vec3::new(0.05, 0.05, 0.05);
+    let light     = Vec3::new(1.0, 0.5, 0.5) * light_1 +
+                    Vec3::new(0.5, 0.5, 1.0) * light_2 +
                     ambient;
     let occlusion = *col * *col;
 
@@ -803,19 +803,18 @@ fn normalize_phong_lobe(power: f32) -> f32
 }
 
 fn shader_cm_refl(p: &Vec3<f32>,
-                 n: &Vec3<f32>,
-                 col: &Vec3<f32>,
-                 eye: &Pnt3<f32>,
-                 _tick: f64) -> Vec3<f32> {
+                  n: &Vec3<f32>,
+                  col: &Vec3<f32>,
+                  eye: &Pnt3<f32>,
+                  _tick: f64) -> Vec3<f32> {
     let n   = fast_normalize(n);
     let eye = *p - *eye.as_vec();
     let r   = &reflect(&eye, &n);
 
-    // lookup_cm(&_CM_GRACE.cos_1, &n) * 5.0 * *col
     (
-      lookup_cm(&_CM_GRACE.cos_1,  &n) * 6.0
-    + lookup_cm(&_CM_GRACE.cos_8,  &r) * normalize_phong_lobe(8.0 ) * 2.0
-    //+ lookup_cm(&_CM_GRACE.cos_512, &r) * normalize_phong_lobe(512.0) * 2.2
+      lookup_cm(&_CM_GRACE.cos_1,   &n)                               * 1.0
+    + lookup_cm(&_CM_GRACE.cos_8,   &r) * normalize_phong_lobe(8.0  ) * 1.0
+    + lookup_cm(&_CM_GRACE.cos_64,  &r) * normalize_phong_lobe(64.0 ) * 1.0
     )
     * (*col * *col)
 }
@@ -924,8 +923,8 @@ fn build_scene<'a>(scene: Scene, tick: f64) -> (&'a Mesh, Shader, Pnt3<f32>) {
         Scene::Cube       => shader_color,
         Scene::Sphere     => shader_n_to_color,
         Scene::CornellBox => shader_color,
-        Scene::Head       => shader_dir_light_ao,
-        Scene::TorusKnot  => shader_cm_refl,
+        Scene::Head       => shader_cm_refl,
+        Scene::TorusKnot  => shader_dir_light_ao,
         Scene::Killeroo   => shader_cm_refl,
         Scene::Hand       => shader_color,
         Scene::Cat        => shader_dir_light_ao

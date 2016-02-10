@@ -541,45 +541,39 @@ fn draw_cm_cross_buffer(cm: &CM) -> (Vec<u32>, i32, i32) {
 fn lookup_cm(cm: &CM, dir: &Vec3<f32>) -> Vec3<f32> {
     // Fetch the closest texel pointed at by 'dir' from passed cube map
 
+    // TODO: Write version with bilinear filtering
+
+    // TODO: Separate lookup and coordinate generation, allowing us to re-use
+    //       coordinates when looking up into multiple cube maps with the same vector
+
     let face;
     let mut u;
     let mut v;
     let dir_abs = Vec3::new(dir.x.abs(), dir.y.abs(), dir.z.abs());
 
-    if dir_abs.x > dir_abs.y && dir_abs.x > dir_abs.z  {
-        if dir.x > 0.0  {
-            face = CMFaceName::XPos;
-        } else  {
-            face = CMFaceName::XNeg;
-        }
+    // Find major axis
+    if dir_abs.x > dir_abs.y && dir_abs.x > dir_abs.z {
+        face = if dir.x > 0.0 { CMFaceName::XPos } else { CMFaceName::XNeg }
         u = dir.z / dir_abs.x;
         v = dir.y / dir_abs.x;
-    } else if dir_abs.y > dir_abs.x && dir_abs.y > dir_abs.z  {
-        if dir.y > 0.0  {
-            face = CMFaceName::YPos;
-        } else  {
-            face = CMFaceName::YNeg;
-        }
+    } else if dir_abs.y > dir_abs.x && dir_abs.y > dir_abs.z {
+        face = if dir.y > 0.0 { CMFaceName::YPos } else { CMFaceName::YNeg }
         u = dir.x / dir_abs.y;
         v = dir.z / dir_abs.y;
-    } else  {
-        if dir.z > 0.0  {
-            face = CMFaceName::ZPos;
-        } else  {
-            face = CMFaceName::ZNeg;
-        }
+    } else {
+        face = if dir.z > 0.0 { CMFaceName::ZPos } else { CMFaceName::ZNeg }
         u = dir.x / dir_abs.z;
         v = dir.y / dir_abs.z;
     }
 
+    // Face texel coordinates
     u = (u + 1.0) * 0.5;
     v = (v + 1.0) * 0.5;
-
     let tx = na::clamp((u * CM_FACE_WDH as f32) as i32, 0, CM_FACE_WDH - 1);
     let ty = na::clamp((v * CM_FACE_WDH as f32) as i32, 0, CM_FACE_WDH - 1);
 
+    // Lookup
     let idx = tx + ty * CM_FACE_WDH;
-
     cm[face as usize][idx as usize]
 }
 
@@ -889,6 +883,9 @@ fn fast_unit_pow16(v: f32) -> f32 {
     //     let v = i as f32 / (600.0 + 255.0);
     //     println!("{:<12},", v.powf(16.0));
     // }
+    //
+    // Table is shifted so more entries are used for the larger values, useful when
+    // dealing with floats that will be converted to 8bit color values
 
     static TBL: [f32; 256] = [
         0.003459093 , 0.003552495 , 0.0036482627, 0.0037464416, 0.0038470984, 0.003950281 ,
@@ -1165,7 +1162,9 @@ static GAMMA_11BIT_LUT: [u8; 2048] = [
 ];
 
 fn rgbf_to_abgr32_gamma(r: f32, g: f32, b: f32) -> u32 {
-    // Clamp, gamma correct and covert floating-point RGB triplet to a packed ABGR32 value
+    // Clamp, gamma correct and covert floating-point RGB triplet to a packed ABGR32
+    // value. Doing gamma correction in full float precision is very expensive due to the
+    // pow() calls. 8bit introduces severe banding. A 11bit LUT is a good compromise
 
     let r11_idx = (r * 2047.0) as i32;
     let g11_idx = (g * 2047.0) as i32;
@@ -1205,6 +1204,8 @@ fn rgbf_to_abgr32_gamma(r: f32, g: f32, b: f32) -> u32 {
 }
 
 fn rgbf_to_abgr32(r: f32, g: f32, b: f32) -> u32 {
+    // Clamp and covert floating-point RGB triplet to a packed ABGR32, no gamma correction
+
     let r8 = (na::clamp(r, 0.0, 1.0) * 255.0) as u32;
     let g8 = (na::clamp(g, 0.0, 1.0) * 255.0) as u32;
     let b8 = (na::clamp(b, 0.0, 1.0) * 255.0) as u32;

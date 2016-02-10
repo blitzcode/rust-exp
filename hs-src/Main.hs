@@ -52,7 +52,7 @@ main = do
       _aeGLFWEventsQueue <- newTQueueIO
       let w = 512
           h = 512
-       in withWindow w h "Viewer" _aeGLFWEventsQueue $ \_aeWindow ->
+       in withWindow w h False "Viewer" _aeGLFWEventsQueue $ \_aeWindow ->
           withFontTexture $ \_aeFontTexture ->
           withFrameBuffer w h LowQualityDownscaling $ \_aeFB ->
           withQuadRenderer 4096 $ \_aeQR ->

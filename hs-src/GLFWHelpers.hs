@@ -5,23 +5,27 @@ module GLFWHelpers ( withWindow
                    ) where
 
 import Control.Exception
+import Control.Monad
 import Control.Concurrent.STM
 import qualified Graphics.UI.GLFW as GLFW
+import qualified Graphics.GL as GLR
 
 -- Various utility functions related to GLFW
 
-withWindow :: Int -> Int -> String -> TQueue GLFWEvent -> (GLFW.Window -> IO ()) -> IO ()
-withWindow w h title tq =
+withWindow :: Int -> Int -> Bool -> String -> TQueue GLFWEvent -> (GLFW.Window -> IO ()) -> IO ()
+withWindow w h srgb title tq =
     bracket
         ( do GLFW.setErrorCallback . Just $ errorCallback tq
              True <- GLFW.init
              -- GLFW.windowHint $ GLFW.WindowHint'Samples 4
              -- GLFW.windowHint $ GLFW.WindowHint'Decorated False
              GLFW.windowHint $ GLFW.WindowHint'Resizable True
+             when srgb . GLFW.windowHint $ GLFW.WindowHint'sRGBCapable True
              modernOpenGL
              Just window <- GLFW.createWindow w h title Nothing Nothing
              registerCallbacks window tq
              GLFW.makeContextCurrent $ Just window
+             when srgb $ GLR.glEnable GLR.GL_FRAMEBUFFER_SRGB
              return window
         )
         ( \window -> do GLFW.destroyWindow window

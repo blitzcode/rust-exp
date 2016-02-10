@@ -142,9 +142,9 @@ updateAndReturnFrameTimes = do
         fdBest           = case frameDeltas of [] -> 0; xs -> minimum xs
      in return $ printf "%.2fFPS/%.1fms (L: %.2fms, H: %.2fms)"
                         (1.0 / fdMedian)
-                        (fdMedian  * 1000)
-                        (1.0 / fdWorst)
-                        (1.0 / fdBest)
+                        (fdMedian * 1000)
+                        (fdBest   * 1000)
+                        (fdWorst  * 1000)
 
 setVSync :: (MonadIO m, MonadState AppState m) => m ()
 setVSync = use asVSync >>= \vsync -> liftIO . GLFW.swapInterval $ if vsync then 1 else 0

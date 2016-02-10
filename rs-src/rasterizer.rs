@@ -802,24 +802,76 @@ fn shader_dir_light_ao(p: &Vec3<f32>,
 
 fn normalize_phong_lobe(power: f32) -> f32
 {
-    (power + 2.0) / 2.0
+    (power + 2.0) * 0.5
+}
+
+fn cm_from_tick<'a>(tick: f64) -> &'a IrradianceCMSet {
+    let cube_maps: [&IrradianceCMSet; 8] = [
+        &_CM_GRACE,
+        &_CM_PARKING_LOT,
+        &_CM_ENIS,
+        &_CM_GLACIER,
+        &_CM_PISA,
+        &_CM_PINE_TREE,
+        &_CM_UFFIZI,
+        &_CM_DOGE
+    ];
+
+    cube_maps[(tick / 3.0) as usize % cube_maps.len()]
 }
 
 fn shader_cm_refl(p: &Vec3<f32>,
                   n: &Vec3<f32>,
                   col: &Vec3<f32>,
                   eye: &Pnt3<f32>,
-                  _tick: f64) -> Vec3<f32> {
+                  tick: f64) -> Vec3<f32> {
     let n   = fast_normalize(n);
     let eye = *p - *eye.as_vec();
     let r   = &reflect(&eye, &n);
 
+    let cm = cm_from_tick(tick);
+
     (
-      lookup_cm(&_CM_GRACE.cos_1,   &n)                               * 1.0
-    + lookup_cm(&_CM_GRACE.cos_8,   &r) * normalize_phong_lobe(8.0  ) * 1.0
-    + lookup_cm(&_CM_GRACE.cos_64,  &r) * normalize_phong_lobe(64.0 ) * 1.0
+      lookup_cm(&cm.cos_1,   &n)                              * 1.0
+    + lookup_cm(&cm.cos_8,   &r) * normalize_phong_lobe(8.0 ) * 1.0
+    + lookup_cm(&cm.cos_64,  &r) * normalize_phong_lobe(64.0) * 1.0
     )
     * (*col * *col)
+
+    /*
+    let fresnel = fresnel_conductor(na::dot(&-eye, &n), 1.0, 1.1);
+    (
+      lookup_cm(&cm.cos_1,   &n)
+    + lookup_cm(&cm.cos_8,   &r) * normalize_phong_lobe(8.0  ) * fresnel
+    + lookup_cm(&cm.cos_512, &r) * normalize_phong_lobe(512.0) * fresnel
+    )
+    * (*col * *col)
+    */
+}
+
+fn fresnel_conductor(
+    cosi: f32, // Cosine between normal and incident ray
+    eta:  f32, // Index of refraction
+    k:    f32) // Absorption coefficient
+    -> f32 {
+    // Compute Fresnel term for a conductor, PBRT 1st edition p422
+
+    // Material | Eta   | K
+    // ------------------------
+    // Gold     | 0.370 | 2.820
+    // Silver   | 0.177 | 3.638
+    // Copper   | 0.617 | 2.63
+    // Steel    | 2.485 | 3.433
+
+    let tmp = (eta * eta + k * k) * cosi * cosi;
+    let r_parallel_2 =
+        (tmp - (2.0 * eta * cosi) + 1.0) /
+        (tmp + (2.0 * eta * cosi) + 1.0);
+    let tmp_f = eta * eta + k * k;
+    let r_perpend_2 =
+        (tmp_f - (2.0 * eta * cosi) + cosi * cosi) /
+        (tmp_f + (2.0 * eta * cosi) + cosi * cosi);
+    (r_parallel_2 + r_perpend_2) / 2.0
 }
 
 fn fast_normalize(n: &Vec3<f32>) -> Vec3<f32> {
@@ -1412,6 +1464,7 @@ pub extern fn rast_draw(shade_per_pixel: i32,
     }
 
     // Cube map unfolded LDR preview overlay
-    _CM_GRACE.draw_cross(10, 10, w, h, fb);
+    let cm = cm_from_tick(tick);
+    cm.draw_cross(10, 10, w, h, fb);
 }
 

@@ -437,7 +437,7 @@ fn load_hdr(file_name: &String) -> image::Image<f32> {
 }
 
 #[no_mangle]
-pub extern fn rast_get_num_cm_sets() -> i32 { 8 }
+pub extern fn rast_get_num_cm_sets() -> i32 { 9 }
 
 #[no_mangle]
 pub extern fn rast_get_cm_set_name(idx: i32) -> *const u8 { cm_set_by_idx(idx).0.as_ptr() }
@@ -465,6 +465,8 @@ fn cm_set_by_idx<'a>(idx: i32) -> (&'a str, &'a IrradianceCMSet) {
             IrradianceCMSet::from_path("envmaps/uffizi"     );
         static ref CM_DOGE: IrradianceCMSet =
             IrradianceCMSet::from_path("envmaps/doge"       );
+        static ref CM_COLTEST: IrradianceCMSet =
+            IrradianceCMSet::from_path("envmaps/coltest/"   );
     }
 
     match idx {
@@ -477,6 +479,7 @@ fn cm_set_by_idx<'a>(idx: i32) -> (&'a str, &'a IrradianceCMSet) {
         5 => ("PineTree\0"  , &CM_PINE_TREE  ),
         6 => ("Uffizi\0"    , &CM_UFFIZI     ),
         7 => ("Doge\0"      , &CM_DOGE       ),
+        8 => ("ColTest\0"   , &CM_COLTEST    ),
         _ => panic!("cm_set_by_idx: Invalid index: {}", idx)
     }
 }

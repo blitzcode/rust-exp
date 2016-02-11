@@ -69,7 +69,7 @@ instance Experiment RustRasterizerExperiment where
                                      , _rrShadePerPixel = False
                                      , _rrMode          = Fill
                                      , _rrMeshIdx       = Index 5 (num_mesh   - 1)
-                                     , _rrShaderIdx     = Index 3 (num_shader - 1)
+                                     , _rrShaderIdx     = Index 5 (num_shader - 1)
                                      , _rrCMIdx         = Index 0 (num_cm     - 1)
                                      , _rrBgIdx         = Index 0 (num_bg     - 1)
                                      }

@@ -52,6 +52,7 @@ fn mesh_by_idx<'a>(idx: i32) -> (&'a str, CameraFromTime, &'a Mesh) {
 
     // Name, camera and geometry tuple
     match idx {
+        // Null terminated names so we can easily pass them as C strings
         0  => ("Cube\0"      , cam_orbit,        &MESH_CUBE      ),
         1  => ("Sphere\0"    , cam_orbit,        &MESH_SPHERE    ),
         2  => ("CornellBox\0", cam_pan_front,    &MESH_CORNELL   ),
@@ -464,6 +465,7 @@ fn cm_set_by_idx<'a>(idx: i32) -> (&'a str, &'a IrradianceCMSet) {
     }
 
     match idx {
+        // Null terminated names so we can easily pass them as C strings
         0 => ("Grace\0"     , &CM_GRACE      ),
         1 => ("ParkingLot\0", &CM_PARKING_LOT),
         2 => ("Enis\0"      , &CM_ENIS       ),
@@ -859,20 +861,37 @@ fn reflect(i: &Vec3<f32>, n: &Vec3<f32>) -> Vec3<f32> {
 }
 
 #[no_mangle]
-pub extern fn rast_get_num_shaders() -> i32 { 4 }
+pub extern fn rast_get_num_shaders() -> i32 { 13 }
 
 #[no_mangle]
 pub extern fn rast_get_shader_name(idx: i32) -> *const u8 { shader_by_idx(idx).0.as_ptr() }
 
 fn shader_by_idx<'a>(idx: i32) -> (&'a str, bool, Shader) {
-   // Retrieve shader name, cube map usage and function by its index
-   match idx  {
-       0 => ("BakedColor\0"       , false, shader_color       ),
-       1 => ("Normals\0"          , false, shader_n_to_color  ),
-       2 => ("Plastic2xDirLight\0", false, shader_dir_light_ao),
-       3 => ("CMRefl\0"           , true , shader_cm_refl     ),
-       _ => panic!("shader_by_idx: Invalid index: {}", idx)
-   }
+    // Retrieve shader name, cube map usage and function by its index
+
+    let shaders: [(&str, bool, Shader); 13] = [
+        // Null terminated names so we can easily pass them as C strings
+        ("BakedColor\0"       , false, shader_color             ),
+        ("Normals\0"          , false, shader_n_to_color        ),
+        ("Headlight\0"        , false, shader_headlight         ),
+        ("Plastic2xDirLight\0", false, shader_dir_light         ),
+        ("CMDiffuse\0"        , true , shader_cm_diffuse        ),
+        ("CMRefl\0"           , true , shader_cm_refl           ),
+        ("CMCoated\0"         , true , shader_cm_coated         ),
+        ("CMDiffRim\0"        , true , shader_cm_diff_rim       ),
+        ("CMGlossy\0"         , true , shader_cm_glossy         ),
+        ("CMGreenHighlight\0" , true , shader_cm_green_highlight),
+        ("CMRedMaterial\0"    , true , shader_cm_red_material   ),
+        ("CMMetallic\0"       , true , shader_cm_metallic       ),
+        ("CMSuperShiny\0"     , true , shader_cm_super_shiny    )
+    ];
+
+    assert!(rast_get_num_shaders() as usize == shaders.len());
+    if idx as usize >= shaders.len() {
+        panic!("shader_by_idx: Invalid index: {}", idx)
+    }
+
+    shaders[idx as usize]
 }
 
 // All shaders have this signature
@@ -904,13 +923,26 @@ fn shader_n_to_color(_p: &Vec3<f32>,
     (n.normalize() + 1.0) * 0.5
 }
 
-fn shader_dir_light_ao(p: &Vec3<f32>,
-                       n: &Vec3<f32>,
-                       col: &Vec3<f32>,
-                       eye: &Pnt3<f32>,
-                       _tick: f64,
-                       _cm: &IrradianceCMSet) -> Vec3<f32> {
-    // Specular material lit by two light sources, mesh color is treated as AO factor
+fn shader_headlight(p: &Vec3<f32>,
+                    n: &Vec3<f32>,
+                    col: &Vec3<f32>,
+                    eye: &Pnt3<f32>,
+                    _tick: f64,
+                    _cm: &IrradianceCMSet) -> Vec3<f32> {
+    let n         = fast_normalize(n);
+    let l         = fast_normalize(&(*eye.as_vec() - *p));
+    let ldotn     = na::clamp(na::dot(&l, &n), 0.0, 1.0);
+    let occlusion = *col * *col;
+    occlusion * ldotn
+}
+
+fn shader_dir_light(p: &Vec3<f32>,
+                    n: &Vec3<f32>,
+                    col: &Vec3<f32>,
+                    eye: &Pnt3<f32>,
+                    _tick: f64,
+                    _cm: &IrradianceCMSet) -> Vec3<f32> {
+    // Specular material lit by two light sources
 
     let n   = fast_normalize(n);
     let eye = *p - *eye.as_vec();
@@ -945,6 +977,17 @@ fn normalize_phong_lobe(power: f32) -> f32
     (power + 2.0) * 0.5
 }
 
+fn shader_cm_diffuse(_p: &Vec3<f32>,
+                     n: &Vec3<f32>,
+                     col: &Vec3<f32>,
+                     _eye: &Pnt3<f32>,
+                     _tick: f64,
+                     cm: &IrradianceCMSet) -> Vec3<f32> {
+    let n = fast_normalize(n);
+
+    lookup_cm(&cm.cos_1, &n) * (*col * *col)
+}
+
 fn shader_cm_refl(p: &Vec3<f32>,
                   n: &Vec3<f32>,
                   col: &Vec3<f32>,
@@ -956,21 +999,130 @@ fn shader_cm_refl(p: &Vec3<f32>,
     let r   = &reflect(&eye, &n);
 
     (
-      lookup_cm(&cm.cos_1,   &n)                              * 1.0
-    + lookup_cm(&cm.cos_8,   &r) * normalize_phong_lobe(8.0 ) * 1.0
-    + lookup_cm(&cm.cos_64,  &r) * normalize_phong_lobe(64.0) * 1.0
+      lookup_cm(&cm.cos_1 , &n)
+    + lookup_cm(&cm.cos_8 , &r) * normalize_phong_lobe(8.0 )
+    + lookup_cm(&cm.cos_64, &r) * normalize_phong_lobe(64.0)
     )
     * (*col * *col)
+}
 
-    /*
+fn shader_cm_coated(p: &Vec3<f32>,
+                    n: &Vec3<f32>,
+                    col: &Vec3<f32>,
+                    eye: &Pnt3<f32>,
+                    _tick: f64,
+                    cm: &IrradianceCMSet) -> Vec3<f32> {
+    let n   = fast_normalize(n);
+    let eye = *p - *eye.as_vec();
+    let r   = &reflect(&eye, &n);
+
     let fresnel = fresnel_conductor(na::dot(&-eye, &n), 1.0, 1.1);
     (
-      lookup_cm(&cm.cos_1,   &n)
-    + lookup_cm(&cm.cos_8,   &r) * normalize_phong_lobe(8.0  ) * fresnel
-    + lookup_cm(&cm.cos_512, &r) * normalize_phong_lobe(512.0) * fresnel
+      lookup_cm(&cm.cos_1  , &n)                                         * 0.85
+    + lookup_cm(&cm.cos_8  , &r) * normalize_phong_lobe(8.0  ) * fresnel
+    + lookup_cm(&cm.cos_512, &r) * normalize_phong_lobe(512.0) * fresnel * 1.5
     )
     * (*col * *col)
-    */
+}
+
+fn shader_cm_diff_rim(p: &Vec3<f32>,
+                      n: &Vec3<f32>,
+                      col: &Vec3<f32>,
+                      eye: &Pnt3<f32>,
+                      _tick: f64,
+                      cm: &IrradianceCMSet) -> Vec3<f32> {
+    let n   = fast_normalize(n);
+    let eye = *p - *eye.as_vec();
+
+    let fresnel = fresnel_conductor(na::dot(&-eye, &n), 1.0, 1.1);
+
+    (lookup_cm(&cm.cos_1, &n) + fresnel) * *col
+}
+
+fn shader_cm_glossy(p: &Vec3<f32>,
+                    n: &Vec3<f32>,
+                    col: &Vec3<f32>,
+                    eye: &Pnt3<f32>,
+                    _tick: f64,
+                    cm: &IrradianceCMSet) -> Vec3<f32> {
+    let n   = fast_normalize(n);
+    let eye = *p - *eye.as_vec();
+    let r   = &reflect(&eye, &n);
+
+    (
+      lookup_cm(&cm.cos_1, &n)
+    + lookup_cm(&cm.cos_8, &r) * normalize_phong_lobe(8.0)
+    )
+    * (*col * *col)
+}
+
+fn shader_cm_green_highlight(p: &Vec3<f32>,
+                             n: &Vec3<f32>,
+                             col: &Vec3<f32>,
+                             eye: &Pnt3<f32>,
+                             _tick: f64,
+                             cm: &IrradianceCMSet) -> Vec3<f32> {
+    let n   = fast_normalize(n);
+    let eye = *p - *eye.as_vec();
+    let r   = &reflect(&eye, &n);
+
+    (
+      lookup_cm(&cm.cos_1 , &n)
+    + lookup_cm(&cm.cos_64, &r) * normalize_phong_lobe(64.0) * Vec3::new(0.2, 0.8, 0.2)
+    )
+    * (*col * *col)
+}
+
+fn shader_cm_red_material(p: &Vec3<f32>,
+                          n: &Vec3<f32>,
+                          col: &Vec3<f32>,
+                          eye: &Pnt3<f32>,
+                          _tick: f64,
+                          cm: &IrradianceCMSet) -> Vec3<f32> {
+    let n   = fast_normalize(n);
+    let eye = *p - *eye.as_vec();
+    let r   = &reflect(&eye, &n);
+
+    (
+      lookup_cm(&cm.cos_1  , &n) * Vec3::new(0.8, 0.2, 0.2)
+    + lookup_cm(&cm.cos_512, &r) * normalize_phong_lobe(512.0)
+    )
+    * (*col * *col)
+}
+
+fn shader_cm_metallic(p: &Vec3<f32>,
+                      n: &Vec3<f32>,
+                      col: &Vec3<f32>,
+                      eye: &Pnt3<f32>,
+                      _tick: f64,
+                      cm: &IrradianceCMSet) -> Vec3<f32> {
+    let n   = fast_normalize(n);
+    let eye = *p - *eye.as_vec();
+    let r   = &reflect(&eye, &n);
+
+    (
+      lookup_cm(&cm.cos_8 , &r)
+    + lookup_cm(&cm.cos_64, &r) * normalize_phong_lobe(64.0)
+    )
+    * (*col)
+}
+
+fn shader_cm_super_shiny(p: &Vec3<f32>,
+                         n: &Vec3<f32>,
+                         col: &Vec3<f32>,
+                         eye: &Pnt3<f32>,
+                         _tick: f64,
+                         cm: &IrradianceCMSet) -> Vec3<f32> {
+    let n   = fast_normalize(n);
+    let eye = *p - *eye.as_vec();
+    let r   = &reflect(&eye, &n);
+
+    (
+      lookup_cm(&cm.cos_64 , &r) * normalize_phong_lobe(64.0)
+    + lookup_cm(&cm.cos_512, &r) * normalize_phong_lobe(512.0)
+    + lookup_cm(&cm.cos_0  , &r)
+    )
+    * (*col)
 }
 
 fn fresnel_conductor(

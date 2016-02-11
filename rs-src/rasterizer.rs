@@ -864,7 +864,7 @@ fn reflect(i: &V3F, n: &V3F) -> V3F {
 }
 
 #[no_mangle]
-pub extern fn rast_get_num_shaders() -> i32 { 13 }
+pub extern fn rast_get_num_shaders() -> i32 { 15 }
 
 #[no_mangle]
 pub extern fn rast_get_shader_name(idx: i32) -> *const u8 { shader_by_idx(idx).0.as_ptr() }
@@ -872,7 +872,7 @@ pub extern fn rast_get_shader_name(idx: i32) -> *const u8 { shader_by_idx(idx).0
 fn shader_by_idx<'a>(idx: i32) -> (&'a str, bool, Shader) {
     // Retrieve shader name, cube map usage and function by its index
 
-    let shaders: [(&str, bool, Shader); 13] = [
+    let shaders: [(&str, bool, Shader); 15] = [
         // Null terminated names so we can easily pass them as C strings
         ("BakedColor\0"       , false, shader_color             ),
         ("Normals\0"          , false, shader_n_to_color        ),
@@ -886,7 +886,9 @@ fn shader_by_idx<'a>(idx: i32) -> (&'a str, bool, Shader) {
         ("CMGreenHighlight\0" , true , shader_cm_green_highlight),
         ("CMRedMaterial\0"    , true , shader_cm_red_material   ),
         ("CMMetallic\0"       , true , shader_cm_metallic       ),
-        ("CMSuperShiny\0"     , true , shader_cm_super_shiny    )
+        ("CMSuperShiny\0"     , true , shader_cm_super_shiny    ),
+        ("CMGold\0"           , true , shader_cm_gold           ),
+        ("CMBlue\0"           , true , shader_cm_blue           )
     ];
 
     assert!(rast_get_num_shaders() as usize == shaders.len());
@@ -1060,6 +1062,37 @@ fn shader_cm_super_shiny(p: &V3F, n: &V3F, col: &V3F, eye: &P3F, _tick: f64,
     + lookup_cm(&cm.cos_0  , &r)
     )
     * (*col)
+}
+
+fn shader_cm_gold(p: &V3F, n: &V3F, col: &V3F, eye: &P3F, _tick: f64,
+                  cm: &IrradianceCMSet) -> V3F {
+    let n      = fast_normalize(n);
+    let l      = fast_normalize(&(*eye.as_vec() - *p));
+    let ldotn  = na::clamp(na::dot(&l, &n), 0.0, 1.0);
+    let eye    = *p - *eye.as_vec();
+    let r      = &reflect(&eye, &n);
+    let albedo = Vec3::new(1.0, 0.76, 0.33);
+
+    ( lookup_cm(&cm.cos_1  , &n)                               * ldotn
+    + lookup_cm(&cm.cos_8  , &r) * normalize_phong_lobe(8.0  ) 
+    + lookup_cm(&cm.cos_512, &r) * normalize_phong_lobe(512.0) * (1.0 - ldotn)
+    )
+    * albedo * (*col * *col)
+}
+
+fn shader_cm_blue(p: &V3F, n: &V3F, col: &V3F, eye: &P3F, _tick: f64,
+                  cm: &IrradianceCMSet) -> V3F {
+    let n     = fast_normalize(n);
+    let l     = fast_normalize(&(*eye.as_vec() - *p));
+    let ldotn = na::clamp(na::dot(&l, &n), 0.0, 1.0);
+    let eye   = *p - *eye.as_vec();
+    let r     = &reflect(&eye, &n);
+
+    ( lookup_cm(&cm.cos_1 ,  &n) * Vec3::new(0.2, 0.2, 0.8)    * ldotn
+    + lookup_cm(&cm.cos_64,  &r) * normalize_phong_lobe(64.0 ) * 0.75
+    + lookup_cm(&cm.cos_512, &r) * normalize_phong_lobe(512.0) * (1.0 - ldotn)
+    )
+    * (*col * *col)
 }
 
 fn fresnel_conductor(

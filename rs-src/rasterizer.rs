@@ -10,6 +10,9 @@ use std::f32;
 use std::f32::consts;
 use stb_image::image;
 
+type V3F = Vec3<f32>;
+type P3F = Pnt3<f32>;
+
 #[no_mangle]
 pub extern fn rast_get_num_meshes() -> i32 { 11 }
 
@@ -69,23 +72,23 @@ fn mesh_by_idx<'a>(idx: i32) -> (&'a str, CameraFromTime, &'a Mesh) {
 }
 
 // Eye position at the given time
-type CameraFromTime = fn(f64) -> Pnt3<f32>;
+type CameraFromTime = fn(f64) -> P3F;
 
-fn cam_orbit(tick: f64) -> Pnt3<f32> {
+fn cam_orbit(tick: f64) -> P3F {
     // Orbit around object
     Pnt3::new(((tick / 1.25).cos() * 1.8) as f32,
               0.0,
               ((tick / 1.25).sin() * 1.8) as f32)
 }
 
-fn cam_orbit_closer(tick: f64) -> Pnt3<f32> {
+fn cam_orbit_closer(tick: f64) -> P3F {
     // Orbit closer around object
     Pnt3::new(((tick / 1.25).cos() * 1.6) as f32,
               0.0,
               ((tick / 1.25).sin() * 1.6) as f32)
 }
 
-fn cam_orbit_front(tick: f64) -> Pnt3<f32> {
+fn cam_orbit_front(tick: f64) -> P3F {
     // Slow, dampened orbit around the front of the object, some slow vertical bobbing as well
     let tick_slow = tick / 3.5;
     let reverse   = tick_slow as i64 % 2 == 1;
@@ -104,7 +107,7 @@ fn cam_orbit_front(tick: f64) -> Pnt3<f32> {
               tick_seg.sin() as f32)
 }
 
-fn cam_pan_front(tick: f64) -> Pnt3<f32> {
+fn cam_pan_front(tick: f64) -> P3F {
     // Camera makes circular motion looking at the box (which is open at the back)
     Pnt3::new((tick.cos() * 0.3) as f32,
               (tick.sin() * 0.3) as f32,
@@ -121,9 +124,9 @@ fn smootherstep(edge0: f32, edge1: f32, x: f32) -> f32
 
 #[derive(Clone, Copy)]
 struct Vertex {
-    p:   Pnt3<f32>,
-    n:   Vec3<f32>,
-    col: Vec3<f32>
+    p:   P3F,
+    n:   V3F,
+    col: V3F
 }
 
 impl Vertex {
@@ -155,8 +158,8 @@ impl Triangle {
 struct Mesh {
     tri:      Vec<Triangle>,
     vtx:      Vec<Vertex>,
-    aabb_min: Vec3<f32>,
-    aabb_max: Vec3<f32>
+    aabb_min: V3F,
+    aabb_max: V3F
 }
 
 impl Mesh {
@@ -215,7 +218,7 @@ fn min3<T: PartialOrd>(a: T, b: T, c: T) -> T {
     }
 }
 
-fn face_normal(v0: &Pnt3<f32>, v1: &Pnt3<f32>, v2: &Pnt3<f32>) -> Vec3<f32> {
+fn face_normal(v0: &P3F, v1: &P3F, v2: &P3F) -> V3F {
     na::cross(&(*v1 - *v0), &(*v2 - *v0)).normalize()
 }
 
@@ -484,7 +487,7 @@ static CM_FACE_WDH: i32 = 64;
 #[derive(PartialEq, Debug, Copy, Clone)]
 enum CMFaceName { XPos, XNeg, YPos, YNeg, ZPos, ZNeg }
 
-type CMFace = Vec<Vec3<f32>>;
+type CMFace = Vec<V3F>;
 type CM     = [CMFace; 6];
 
 struct IrradianceCMSet{
@@ -661,7 +664,7 @@ fn draw_cm_cross_buffer(cm: &CM) -> (Vec<u32>, i32, i32) {
     (cross, cross_wdh, cross_hgt)
 }
 
-fn lookup_cm(cm: &CM, dir: &Vec3<f32>) -> Vec3<f32> {
+fn lookup_cm(cm: &CM, dir: &V3F) -> V3F {
     // Fetch the closest texel pointed at by 'dir' from passed cube map
 
     // TODO: Write version with bilinear filtering
@@ -704,7 +707,7 @@ fn lookup_cm(cm: &CM, dir: &Vec3<f32>) -> Vec3<f32> {
 // are all using some rather unusual conventions and are not documented. Replace them with
 // custom variants that work like the usual OpenGL style versions
 
-fn look_at(eye: &Pnt3<f32>, at: &Pnt3<f32>, up: &Vec3<f32>) -> Mat4<f32> {
+fn look_at(eye: &P3F, at: &P3F, up: &V3F) -> Mat4<f32> {
     let zaxis = na::normalize(&(*eye - *at));
     let xaxis = na::normalize(&na::cross(up, &zaxis));
     let yaxis = na::cross(&zaxis, &xaxis);
@@ -737,12 +740,12 @@ fn deg_to_rad(deg: f32) -> f32 {
 #[derive(Clone, Copy)]
 struct TransformedVertex {
     vp:    Pnt4<f32>, // Projected, perspective divided, viewport transformed vertex with W
-    world: Vec3<f32>, // World space vertex and normal for lighting computations etc.
-    n:     Vec3<f32>, // ...
-    col:   Vec3<f32>  // Color
+    world: V3F,       // World space vertex and normal for lighting computations etc.
+    n:     V3F,       // ...
+    col:   V3F        // Color
 }
 
-fn transform_vertices(mesh: &Mesh, w: i32, h: i32, eye: &Pnt3<f32>) -> Vec<TransformedVertex> {
+fn transform_vertices(mesh: &Mesh, w: i32, h: i32, eye: &P3F) -> Vec<TransformedVertex> {
     // Build a mesh to viewport transformation and return a transformed set of vertices
 
     // Build transformations
@@ -810,8 +813,8 @@ fn draw_bg_gradient(bg_idx: i32, w: i32, h: i32, fb: *mut u32) {
     }
 
     for y in 0..h {
-        let pos   = y as f32 / (h - 1) as f32;
-        let col   = start * (1.0 - pos) + end * pos;
+        let pos = y as f32 / (h - 1) as f32;
+        let col = start * (1.0 - pos) + end * pos;
 
         // No gamma. The gradients look nice without it, as it's more perceptually linear
         // this way. It's also faster
@@ -855,7 +858,7 @@ fn draw_line(x1: f32, y1: f32, x2: f32, y2: f32, fb: *mut u32, w: i32, h: i32) {
     }
 }
 
-fn reflect(i: &Vec3<f32>, n: &Vec3<f32>) -> Vec3<f32> {
+fn reflect(i: &V3F, n: &V3F) -> V3F {
     // GLSL style reflection vector function
     *i - (*n * na::dot(n, i) * 2.0)
 }
@@ -895,40 +898,24 @@ fn shader_by_idx<'a>(idx: i32) -> (&'a str, bool, Shader) {
 }
 
 // All shaders have this signature
-type Shader = fn(&Vec3<f32>,          // World space position
-                 &Vec3<f32>,          // World space normal
-                 &Vec3<f32>,          // Color
-                 &Pnt3<f32>,          // World space camera position
+type Shader = fn(&V3F,                // World space position
+                 &V3F,                // World space normal
+                 &V3F,                // Color (usually baked AO / radiosity)
+                 &P3F,                // World space camera position
                  f64,                 // Current time (tick)
-                 &IrradianceCMSet) -> // Selected environment
-                 Vec3<f32>;           // Output color
+                 &IrradianceCMSet) -> // Current environment cube map set
+                 V3F;                 // Output color
 
-fn shader_color(_p: &Vec3<f32>,
-                _n: &Vec3<f32>,
-                col: &Vec3<f32>,
-                _eye: &Pnt3<f32>,
-                _tick: f64,
-                _cm: &IrradianceCMSet) -> Vec3<f32> {
-    // Just use the static mesh color
+fn shader_color(_: &V3F, _: &V3F, col: &V3F, _: &P3F, _: f64, _: &IrradianceCMSet) -> V3F {
     *col
 }
 
-fn shader_n_to_color(_p: &Vec3<f32>,
-                     n: &Vec3<f32>,
-                     _col: &Vec3<f32>,
-                     _eye: &Pnt3<f32>,
-                     _tick: f64,
-                     _cm: &IrradianceCMSet) -> Vec3<f32> {
+fn shader_n_to_color(_: &V3F, n: &V3F, _: &V3F, _: &P3F, _: f64, _: &IrradianceCMSet) -> V3F {
     // Convert the normal to a color
     (n.normalize() + 1.0) * 0.5
 }
 
-fn shader_headlight(p: &Vec3<f32>,
-                    n: &Vec3<f32>,
-                    col: &Vec3<f32>,
-                    eye: &Pnt3<f32>,
-                    _tick: f64,
-                    _cm: &IrradianceCMSet) -> Vec3<f32> {
+fn shader_headlight(p: &V3F, n: &V3F, col: &V3F, eye: &P3F, _: f64, _: &IrradianceCMSet) -> V3F {
     let n         = fast_normalize(n);
     let l         = fast_normalize(&(*eye.as_vec() - *p));
     let ldotn     = na::clamp(na::dot(&l, &n), 0.0, 1.0);
@@ -936,12 +923,8 @@ fn shader_headlight(p: &Vec3<f32>,
     occlusion * ldotn
 }
 
-fn shader_dir_light(p: &Vec3<f32>,
-                    n: &Vec3<f32>,
-                    col: &Vec3<f32>,
-                    eye: &Pnt3<f32>,
-                    _tick: f64,
-                    _cm: &IrradianceCMSet) -> Vec3<f32> {
+fn shader_dir_light(p: &V3F, n: &V3F, col: &V3F, eye: &P3F, _tick: f64,
+                    _cm: &IrradianceCMSet) -> V3F {
     // Specular material lit by two light sources
 
     let n   = fast_normalize(n);
@@ -949,19 +932,17 @@ fn shader_dir_light(p: &Vec3<f32>,
     let r   = fast_normalize(&reflect(&eye, &n));
     let l   = Vec3::new(0.577350269, 0.577350269, 0.577350269); // Normalized (1, 1, 1)
 
-    let light_1;
-    {
+    let light_1 = {
         let ldotn =                 na::clamp(na::dot(&l, &n), 0.0, 1.0);
         let ldotr = fast_unit_pow16(na::clamp(na::dot(&l, &r), 0.0, 1.0));
-        light_1   = ldotn * 0.15 + ldotr * 0.75;
-    }
+        ldotn * 0.25 + ldotr * 0.75
+    };
 
-    let light_2;
-    {
+    let light_2 = {
         let ldotn =                 na::clamp(na::dot(&-l, &n), 0.0, 1.0);
         let ldotr = fast_unit_pow16(na::clamp(na::dot(&-l, &r), 0.0, 1.0));
-        light_2   = ldotn * 0.15 + ldotr * 0.75;
-    }
+        ldotn * 0.25 + ldotr * 0.75
+    };
 
     let ambient   = Vec3::new(0.05, 0.05, 0.05);
     let light     = Vec3::new(1.0, 0.5, 0.5) * light_1 +
@@ -977,60 +958,41 @@ fn normalize_phong_lobe(power: f32) -> f32
     (power + 2.0) * 0.5
 }
 
-fn shader_cm_diffuse(_p: &Vec3<f32>,
-                     n: &Vec3<f32>,
-                     col: &Vec3<f32>,
-                     _eye: &Pnt3<f32>,
-                     _tick: f64,
-                     cm: &IrradianceCMSet) -> Vec3<f32> {
+fn shader_cm_diffuse(_p: &V3F, n: &V3F, col: &V3F, _eye: &P3F, _tick: f64,
+                     cm: &IrradianceCMSet) -> V3F {
     let n = fast_normalize(n);
-
     lookup_cm(&cm.cos_1, &n) * (*col * *col)
 }
 
-fn shader_cm_refl(p: &Vec3<f32>,
-                  n: &Vec3<f32>,
-                  col: &Vec3<f32>,
-                  eye: &Pnt3<f32>,
-                  _tick: f64,
-                  cm: &IrradianceCMSet) -> Vec3<f32> {
+fn shader_cm_refl(p: &V3F, n: &V3F, col: &V3F, eye: &P3F, _tick: f64,
+                  cm: &IrradianceCMSet) -> V3F {
     let n   = fast_normalize(n);
     let eye = *p - *eye.as_vec();
     let r   = &reflect(&eye, &n);
 
-    (
-      lookup_cm(&cm.cos_1 , &n)
+    ( lookup_cm(&cm.cos_1 , &n)
     + lookup_cm(&cm.cos_8 , &r) * normalize_phong_lobe(8.0 )
     + lookup_cm(&cm.cos_64, &r) * normalize_phong_lobe(64.0)
     )
     * (*col * *col)
 }
 
-fn shader_cm_coated(p: &Vec3<f32>,
-                    n: &Vec3<f32>,
-                    col: &Vec3<f32>,
-                    eye: &Pnt3<f32>,
-                    _tick: f64,
-                    cm: &IrradianceCMSet) -> Vec3<f32> {
-    let n   = fast_normalize(n);
-    let eye = *p - *eye.as_vec();
-    let r   = &reflect(&eye, &n);
-
+fn shader_cm_coated(p: &V3F, n: &V3F, col: &V3F, eye: &P3F, _tick: f64,
+                    cm: &IrradianceCMSet) -> V3F {
+    let n       = fast_normalize(n);
+    let eye     = *p - *eye.as_vec();
+    let r       = &reflect(&eye, &n);
     let fresnel = fresnel_conductor(na::dot(&-eye, &n), 1.0, 1.1);
-    (
-      lookup_cm(&cm.cos_1  , &n)                                         * 0.85
+
+    ( lookup_cm(&cm.cos_1  , &n)                                         * 0.85
     + lookup_cm(&cm.cos_8  , &r) * normalize_phong_lobe(8.0  ) * fresnel
     + lookup_cm(&cm.cos_512, &r) * normalize_phong_lobe(512.0) * fresnel * 1.5
     )
     * (*col * *col)
 }
 
-fn shader_cm_diff_rim(p: &Vec3<f32>,
-                      n: &Vec3<f32>,
-                      col: &Vec3<f32>,
-                      eye: &Pnt3<f32>,
-                      _tick: f64,
-                      cm: &IrradianceCMSet) -> Vec3<f32> {
+fn shader_cm_diff_rim(p: &V3F, n: &V3F, col: &V3F, eye: &P3F, _: f64,
+                      cm: &IrradianceCMSet) -> V3F {
     let n   = fast_normalize(n);
     let eye = *p - *eye.as_vec();
 
@@ -1039,86 +1001,61 @@ fn shader_cm_diff_rim(p: &Vec3<f32>,
     (lookup_cm(&cm.cos_1, &n) + fresnel) * *col
 }
 
-fn shader_cm_glossy(p: &Vec3<f32>,
-                    n: &Vec3<f32>,
-                    col: &Vec3<f32>,
-                    eye: &Pnt3<f32>,
-                    _tick: f64,
-                    cm: &IrradianceCMSet) -> Vec3<f32> {
+fn shader_cm_glossy(p: &V3F, n: &V3F, col: &V3F, eye: &P3F, _tick: f64,
+                    cm: &IrradianceCMSet) -> V3F {
     let n   = fast_normalize(n);
     let eye = *p - *eye.as_vec();
     let r   = &reflect(&eye, &n);
 
-    (
-      lookup_cm(&cm.cos_1, &n)
+    ( lookup_cm(&cm.cos_1, &n)
     + lookup_cm(&cm.cos_8, &r) * normalize_phong_lobe(8.0)
     )
     * (*col * *col)
 }
 
-fn shader_cm_green_highlight(p: &Vec3<f32>,
-                             n: &Vec3<f32>,
-                             col: &Vec3<f32>,
-                             eye: &Pnt3<f32>,
-                             _tick: f64,
-                             cm: &IrradianceCMSet) -> Vec3<f32> {
+fn shader_cm_green_highlight(p: &V3F, n: &V3F, col: &V3F, eye: &P3F, _tick: f64,
+                             cm: &IrradianceCMSet) -> V3F {
     let n   = fast_normalize(n);
     let eye = *p - *eye.as_vec();
     let r   = &reflect(&eye, &n);
 
-    (
-      lookup_cm(&cm.cos_1 , &n)
+    ( lookup_cm(&cm.cos_1 , &n)
     + lookup_cm(&cm.cos_64, &r) * normalize_phong_lobe(64.0) * Vec3::new(0.2, 0.8, 0.2)
     )
     * (*col * *col)
 }
 
-fn shader_cm_red_material(p: &Vec3<f32>,
-                          n: &Vec3<f32>,
-                          col: &Vec3<f32>,
-                          eye: &Pnt3<f32>,
-                          _tick: f64,
-                          cm: &IrradianceCMSet) -> Vec3<f32> {
+fn shader_cm_red_material(p: &V3F, n: &V3F, col: &V3F, eye: &P3F, _tick: f64,
+                          cm: &IrradianceCMSet) -> V3F {
     let n   = fast_normalize(n);
     let eye = *p - *eye.as_vec();
     let r   = &reflect(&eye, &n);
 
-    (
-      lookup_cm(&cm.cos_1  , &n) * Vec3::new(0.8, 0.2, 0.2)
+    ( lookup_cm(&cm.cos_1  , &n) * Vec3::new(0.8, 0.2, 0.2)
     + lookup_cm(&cm.cos_512, &r) * normalize_phong_lobe(512.0)
     )
     * (*col * *col)
 }
 
-fn shader_cm_metallic(p: &Vec3<f32>,
-                      n: &Vec3<f32>,
-                      col: &Vec3<f32>,
-                      eye: &Pnt3<f32>,
-                      _tick: f64,
-                      cm: &IrradianceCMSet) -> Vec3<f32> {
+fn shader_cm_metallic(p: &V3F, n: &V3F, col: &V3F, eye: &P3F, _tick: f64,
+                      cm: &IrradianceCMSet) -> V3F {
     let n   = fast_normalize(n);
     let eye = *p - *eye.as_vec();
     let r   = &reflect(&eye, &n);
 
-    (
-      lookup_cm(&cm.cos_8 , &r)
+    ( lookup_cm(&cm.cos_8 , &r)
     + lookup_cm(&cm.cos_64, &r) * normalize_phong_lobe(64.0)
     )
     * (*col)
 }
 
-fn shader_cm_super_shiny(p: &Vec3<f32>,
-                         n: &Vec3<f32>,
-                         col: &Vec3<f32>,
-                         eye: &Pnt3<f32>,
-                         _tick: f64,
-                         cm: &IrradianceCMSet) -> Vec3<f32> {
+fn shader_cm_super_shiny(p: &V3F, n: &V3F, col: &V3F, eye: &P3F, _tick: f64,
+                         cm: &IrradianceCMSet) -> V3F {
     let n   = fast_normalize(n);
     let eye = *p - *eye.as_vec();
     let r   = &reflect(&eye, &n);
 
-    (
-      lookup_cm(&cm.cos_64 , &r) * normalize_phong_lobe(64.0)
+    ( lookup_cm(&cm.cos_64 , &r) * normalize_phong_lobe(64.0)
     + lookup_cm(&cm.cos_512, &r) * normalize_phong_lobe(512.0)
     + lookup_cm(&cm.cos_0  , &r)
     )
@@ -1150,7 +1087,7 @@ fn fresnel_conductor(
     (r_parallel_2 + r_perpend_2) / 2.0
 }
 
-fn fast_normalize(n: &Vec3<f32>) -> Vec3<f32> {
+fn fast_normalize(n: &V3F) -> V3F {
     // nalgbera doesn't use a reciprocal
     let l = 1.0 / (n.x * n.x + n.y * n.y + n.z * n.z).sqrt();
     Vec3::new(n.x * l, n.y * l, n.z * l)

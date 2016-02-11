@@ -57,7 +57,7 @@ processGLFWEvent ev = do
                     when (tick - lastPress < 0.5) .
                         liftIO $ GLFW.setWindowShouldClose win True
                     asLastEscPress .= tick
-                GLFW.Key'S     -> view aeFB >>= \fb -> liftIO $ saveFrameBufferToPNG fb .
+                GLFW.Key'T     -> view aeFB >>= \fb -> liftIO $ saveFrameBufferToPNG fb .
                                     map (\c -> if c `elem` ['/', '\\', ':', ' '] then '-' else c)
                                       . printf "Screenshot-%s.png" =<< show <$> getZonedTime
                 GLFW.Key'V     -> asVSync %= not >> setVSync
@@ -99,17 +99,21 @@ draw = do
     -- Render everything quad based
     (liftIO $ GLFW.getFramebufferSize _aeWindow) >>= \(w, h) ->
         void . withQuadRenderBuffer _aeQR w h $ \qb -> do
-            ftStr           <- updateAndReturnFrameTimes
-            (fbWdh, fbHgt)  <- liftIO $ getFrameBufferDim _aeFB
-            expDesc         <- use asExperimentDesc
-            expStatusString <- runExperimentState experimentStatusString
-            vsync           <- use asVSync
+            ftStr          <- updateAndReturnFrameTimes
+            (fbWdh, fbHgt) <- liftIO $ getFrameBufferDim _aeFB
+            expDesc        <- use asExperimentDesc
+            vsync          <- use asVSync
+            statusString   <- (++) ( "2x[ESC] Exit | Screensho[T] | %ix%i | %s\n" ++
+                                     "[V]Sync: %s | Exp. [-][=] %s | "
+                                   )
+                              <$> runExperimentState experimentStatusString
             liftIO $ do
                 -- Draw frame buffer contents
                 drawFrameBuffer _aeFB qb 0 0 (fromIntegral w) (fromIntegral h)
                 -- FPS counter and mode / statistics / key bindings display
+                let statusStringHgt = (succ . length $ filter (== '\n') statusString) * 12
                 drawQuad qb
-                         0                (fromIntegral h - 36)
+                         0                (fromIntegral h - fromIntegral statusStringHgt)
                          (fromIntegral w) (fromIntegral h)
                          2
                          FCBlack
@@ -117,13 +121,12 @@ draw = do
                          Nothing
                          QuadUVDefault
                 drawTextWithShadow _aeFontTexture qb 3 (h - 12) $ printf
-                    "2x[ESC] Exit | [S]creenshot | %ix%i | %s\n[V]Sync: %s | Exp. [-][=] %s | %s"
+                    statusString
                     fbWdh
                     fbHgt
                     ftStr
                     (if vsync then "On" else "Off")
                     expDesc
-                    expStatusString
   where drawTextWithShadow :: GL.TextureObject -> QuadRenderBuffer -> Int -> Int -> String -> IO ()
         drawTextWithShadow tex qb x y str = do
             drawText tex qb (x + 1) (y - 1) 0x00000000 str
@@ -173,14 +176,14 @@ run env st =
             numExp <- length <$> view aeExperiments
             -- Exit or keep running with a different experiment?
             case r of
-                Left ExpNext -> experimentLoop $ wrapExpIdx (expIdx + 1) numExp 
-                Left ExpPrev -> experimentLoop $ wrapExpIdx (expIdx - 1) numExp 
+                Left ExpNext -> experimentLoop $ wrapExpIdx (expIdx + 1) numExp
+                Left ExpPrev -> experimentLoop $ wrapExpIdx (expIdx - 1) numExp
                 Left ExpExit -> return ()
                 Right ()     -> return ()
               where wrapExpIdx idx numExp | idx < 0       = numExp - 1
                                           | idx >= numExp = 0
                                           | otherwise     = idx
-        -- Experiment setup complete, store state and enter main loop 
+        -- Experiment setup complete, store state and enter main loop
         withExperimentInner :: Experiment e => Int -> e -> AppIO ()
         withExperimentInner expIdx expState = do
             let name = experimentName expState

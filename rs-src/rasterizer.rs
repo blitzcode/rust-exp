@@ -10,18 +10,112 @@ use std::f32;
 use std::f32::consts;
 use stb_image::image;
 
-lazy_static! {
-  static ref CUBE_MESH: Mesh = load_mesh("meshes/cube.dat", MeshFileType::XyzNxNyNzRGB);
-  static ref SPHERE_MESH: Mesh = load_mesh("meshes/sphere.dat", MeshFileType::XyzNxNyNz);
-  static ref CORNELL_MESH: Mesh = load_mesh("meshes/cornell_radiosity.dat", MeshFileType::XyzRGB);
-  static ref HEAD_MESH: Mesh = load_mesh("meshes/head_ao.dat", MeshFileType::XyzNxNyNzRGB);
-  static ref TORUS_KNOT_MESH: Mesh = load_mesh("meshes/torus_knot.dat", MeshFileType::XyzNxNyNz);
-  static ref KILLEROO_MESH: Mesh = load_mesh("meshes/killeroo_ao.dat", MeshFileType::XyzNxNyNzRGB);
-  static ref HAND_MESH: Mesh = load_mesh("meshes/hand_ao.dat", MeshFileType::XyzNxNyNzRGB);
-  static ref CAT_MESH: Mesh = load_mesh("meshes/cat_ao.dat", MeshFileType::XyzNxNyNzRGB);
-  static ref TEAPOT_MESH: Mesh = load_mesh("meshes/teapot.dat", MeshFileType::XyzNxNyNz);
-  static ref DWARF_MESH: Mesh = load_mesh("meshes/dwarf.dat", MeshFileType::XyzNxNyNzRGB);
-  static ref BLOB_MESH: Mesh = load_mesh("meshes/blob.dat", MeshFileType::XyzNxNyNz);
+#[no_mangle]
+pub extern fn rast_get_num_meshes() -> i32 { 11 }
+
+#[no_mangle]
+pub extern fn rast_get_mesh_name(idx: i32) -> *const u8 { mesh_by_idx(idx).0.as_ptr() }
+
+#[no_mangle]
+pub extern fn rast_get_mesh_tri_cnt(idx: i32) -> i32 { mesh_by_idx(idx).2.tri.len() as i32 }
+
+fn mesh_by_idx<'a>(idx: i32) -> (&'a str, CameraFromTime, &'a Mesh) {
+    // Retrieve mesh name, camera and geometry by its index. We do this in such an awkward
+    // way so we can take advantage of the on-demand loading of the cube maps through
+    // lazy_static
+
+    // Mesh geometry
+    lazy_static! {
+        static ref MESH_CUBE: Mesh =
+            load_mesh("meshes/cube.dat"             , MeshFileType::XyzNxNyNzRGB);
+        static ref MESH_SPHERE: Mesh =
+            load_mesh("meshes/sphere.dat"           , MeshFileType::XyzNxNyNz   );
+        static ref MESH_CORNELL: Mesh =
+            load_mesh("meshes/cornell_radiosity.dat", MeshFileType::XyzRGB      );
+        static ref MESH_HEAD: Mesh =
+            load_mesh("meshes/head_ao.dat"          , MeshFileType::XyzNxNyNzRGB);
+        static ref MESH_TORUS_KNOT: Mesh =
+            load_mesh("meshes/torus_knot.dat"       , MeshFileType::XyzNxNyNz   );
+        static ref MESH_KILLEROO: Mesh =
+            load_mesh("meshes/killeroo_ao.dat"      , MeshFileType::XyzNxNyNzRGB);
+        static ref MESH_HAND: Mesh =
+            load_mesh("meshes/hand_ao.dat"          , MeshFileType::XyzNxNyNzRGB);
+        static ref MESH_CAT: Mesh =
+            load_mesh("meshes/cat_ao.dat"           , MeshFileType::XyzNxNyNzRGB);
+        static ref MESH_TEAPOT: Mesh =
+            load_mesh("meshes/teapot.dat"           , MeshFileType::XyzNxNyNz   );
+        static ref MESH_DWARF: Mesh =
+            load_mesh("meshes/dwarf.dat"            , MeshFileType::XyzNxNyNzRGB);
+        static ref MESH_BLOB: Mesh =
+            load_mesh("meshes/blob.dat"             , MeshFileType::XyzNxNyNz   );
+    }
+
+    // Name, camera and geometry tuple
+    match idx {
+        0  => ("Cube\0"      , cam_orbit,        &MESH_CUBE      ),
+        1  => ("Sphere\0"    , cam_orbit,        &MESH_SPHERE    ),
+        2  => ("CornellBox\0", cam_pan_front,    &MESH_CORNELL   ),
+        3  => ("Head\0"      , cam_orbit_closer, &MESH_HEAD      ),
+        4  => ("TorusKnot\0" , cam_orbit,        &MESH_TORUS_KNOT),
+        5  => ("Killeroo\0"  , cam_orbit_front,  &MESH_KILLEROO  ),
+        6  => ("Hand\0"      , cam_orbit_closer, &MESH_HAND      ),
+        7  => ("Cat\0"       , cam_orbit_closer, &MESH_CAT       ),
+        8  => ("Teapot\0"    , cam_orbit_closer, &MESH_TEAPOT    ),
+        9  => ("Dwarf\0"     , cam_orbit_front,  &MESH_DWARF     ),
+        10 => ("Blob\0"      , cam_orbit,        &MESH_BLOB      ),
+        _  => panic!("mesh_by_idx: Invalid index: {}", idx)
+    }
+}
+
+// Eye position at the given time
+type CameraFromTime = fn(f64) -> Pnt3<f32>;
+
+fn cam_orbit(tick: f64) -> Pnt3<f32> {
+    // Orbit around object
+    Pnt3::new(((tick / 1.25).cos() * 1.8) as f32,
+              0.0,
+              ((tick / 1.25).sin() * 1.8) as f32)
+}
+
+fn cam_orbit_closer(tick: f64) -> Pnt3<f32> {
+    // Orbit closer around object
+    Pnt3::new(((tick / 1.25).cos() * 1.6) as f32,
+              0.0,
+              ((tick / 1.25).sin() * 1.6) as f32)
+}
+
+fn cam_orbit_front(tick: f64) -> Pnt3<f32> {
+    // Slow, dampened orbit around the front of the object, some slow vertical bobbing as well
+    let tick_slow = tick / 3.5;
+    let reverse   = tick_slow as i64 % 2 == 1;
+    let tick_f    = if reverse {
+                        1.0 - tick_slow.fract()
+                    } else {
+                        tick_slow.fract()
+                    } as f32;
+    let smooth    = smootherstep(0.0, 1.0, tick_f);
+    let a_weight  = 1.0 - smooth;
+    let b_weight  = smooth;
+    let tick_seg  = -consts::PI / 2.0 -
+                    (-(consts::PI / 6.0) * a_weight + (consts::PI / 6.0) * b_weight);
+    Pnt3::new(tick_seg.cos() as f32,
+              ((tick / 2.0).sin() * 0.25 + 0.2) as f32,
+              tick_seg.sin() as f32)
+}
+
+fn cam_pan_front(tick: f64) -> Pnt3<f32> {
+    // Camera makes circular motion looking at the box (which is open at the back)
+    Pnt3::new((tick.cos() * 0.3) as f32,
+              (tick.sin() * 0.3) as f32,
+              -2.0)
+}
+
+fn smootherstep(edge0: f32, edge1: f32, x: f32) -> f32
+{
+    // Scale and clamp x to 0..1 range
+    let x = na::clamp((x - edge0) / (edge1 - edge0), 0.0, 1.0);
+    // Evaluate polynomial
+    x * x * x * (x * (x * 6.0 - 15.0) + 10.0)
 }
 
 #[derive(Clone, Copy)]
@@ -325,11 +419,6 @@ fn load_mesh(file_name: &str, mesh_file_type: MeshFileType) -> Mesh {
     mesh
 }
 
-#[no_mangle]
-pub extern fn rast_get_mesh_tri_cnt(scene: Scene) -> i32 {
-    mesh_from_enum(scene).tri.len() as i32
-}
-
 fn load_hdr(file_name: &String) -> image::Image<f32> {
     // Load a Radiance HDR image using the stb_image library
     let path = path::Path::new(file_name);
@@ -343,16 +432,48 @@ fn load_hdr(file_name: &String) -> image::Image<f32> {
     }
 }
 
-// Sets of pre-filtered irradiance cube maps
-lazy_static! {
-  static ref _CM_GRACE:       IrradianceCMSet = IrradianceCMSet::from_path("envmaps/grace"      );
-  static ref _CM_PARKING_LOT: IrradianceCMSet = IrradianceCMSet::from_path("envmaps/parking_lot");
-  static ref _CM_ENIS:        IrradianceCMSet = IrradianceCMSet::from_path("envmaps/enis"       );
-  static ref _CM_GLACIER:     IrradianceCMSet = IrradianceCMSet::from_path("envmaps/glacier"    );
-  static ref _CM_PISA:        IrradianceCMSet = IrradianceCMSet::from_path("envmaps/pisa"       );
-  static ref _CM_PINE_TREE:   IrradianceCMSet = IrradianceCMSet::from_path("envmaps/pine_tree"  );
-  static ref _CM_UFFIZI:      IrradianceCMSet = IrradianceCMSet::from_path("envmaps/uffizi"     );
-  static ref _CM_DOGE:        IrradianceCMSet = IrradianceCMSet::from_path("envmaps/doge"       );
+#[no_mangle]
+pub extern fn rast_get_num_cm_sets() -> i32 { 8 }
+
+#[no_mangle]
+pub extern fn rast_get_cm_set_name(idx: i32) -> *const u8 { cm_set_by_idx(idx).0.as_ptr() }
+
+fn cm_set_by_idx<'a>(idx: i32) -> (&'a str, &'a IrradianceCMSet) {
+    // Retrieve irradiance cube map set name and images by its index. We do this in such
+    // an awkward way so we can take advantage of the on-demand loading of the cube maps
+    // through lazy_static
+
+    // Sets of pre-filtered irradiance cube maps
+    lazy_static! {
+        static ref CM_GRACE: IrradianceCMSet =
+            IrradianceCMSet::from_path("envmaps/grace"      );
+        static ref CM_PARKING_LOT: IrradianceCMSet =
+            IrradianceCMSet::from_path("envmaps/parking_lot");
+        static ref CM_ENIS: IrradianceCMSet =
+            IrradianceCMSet::from_path("envmaps/enis"       );
+        static ref CM_GLACIER: IrradianceCMSet =
+            IrradianceCMSet::from_path("envmaps/glacier"    );
+        static ref CM_PISA: IrradianceCMSet =
+            IrradianceCMSet::from_path("envmaps/pisa"       );
+        static ref CM_PINE_TREE: IrradianceCMSet =
+            IrradianceCMSet::from_path("envmaps/pine_tree"  );
+        static ref CM_UFFIZI: IrradianceCMSet =
+            IrradianceCMSet::from_path("envmaps/uffizi"     );
+        static ref CM_DOGE: IrradianceCMSet =
+            IrradianceCMSet::from_path("envmaps/doge"       );
+    }
+
+    match idx {
+        0 => ("Grace\0"     , &CM_GRACE      ),
+        1 => ("ParkingLot\0", &CM_PARKING_LOT),
+        2 => ("Enis\0"      , &CM_ENIS       ),
+        3 => ("Glacier\0"   , &CM_GLACIER    ),
+        4 => ("Pisa\0"      , &CM_PISA       ),
+        5 => ("PineTree\0"  , &CM_PINE_TREE  ),
+        6 => ("Uffizi\0"    , &CM_UFFIZI     ),
+        7 => ("Doge\0"      , &CM_DOGE       ),
+        _ => panic!("cm_set_by_idx: Invalid index: {}", idx)
+    }
 }
 
 // All our irradiance cube map faces have the same fixed dimensions
@@ -553,22 +674,22 @@ fn lookup_cm(cm: &CM, dir: &Vec3<f32>) -> Vec3<f32> {
 
     // Find major axis
     if dir_abs.x > dir_abs.y && dir_abs.x > dir_abs.z {
-        face = if dir.x > 0.0 { CMFaceName::XPos } else { CMFaceName::XNeg }
-        u = dir.z / dir_abs.x;
-        v = dir.y / dir_abs.x;
+        face = if dir.x > 0.0 { CMFaceName::XPos } else { CMFaceName::XNeg };
+        u    = dir.z / dir_abs.x;
+        v    = dir.y / dir_abs.x;
     } else if dir_abs.y > dir_abs.x && dir_abs.y > dir_abs.z {
-        face = if dir.y > 0.0 { CMFaceName::YPos } else { CMFaceName::YNeg }
-        u = dir.x / dir_abs.y;
-        v = dir.z / dir_abs.y;
+        face = if dir.y > 0.0 { CMFaceName::YPos } else { CMFaceName::YNeg };
+        u    = dir.x / dir_abs.y;
+        v    = dir.z / dir_abs.y;
     } else {
-        face = if dir.z > 0.0 { CMFaceName::ZPos } else { CMFaceName::ZNeg }
-        u = dir.x / dir_abs.z;
-        v = dir.y / dir_abs.z;
+        face = if dir.z > 0.0 { CMFaceName::ZPos } else { CMFaceName::ZNeg };
+        u    = dir.x / dir_abs.z;
+        v    = dir.y / dir_abs.z;
     }
 
     // Face texel coordinates
-    u = (u + 1.0) * 0.5;
-    v = (v + 1.0) * 0.5;
+    u      = (u + 1.0) * 0.5;
+    v      = (v + 1.0) * 0.5;
     let tx = na::clamp((u * CM_FACE_WDH as f32) as i32, 0, CM_FACE_WDH - 1);
     let ty = na::clamp((v * CM_FACE_WDH as f32) as i32, 0, CM_FACE_WDH - 1);
 
@@ -669,17 +790,21 @@ fn transform_vertices(mesh: &Mesh, w: i32, h: i32, eye: &Pnt3<f32>) -> Vec<Trans
     vtx_transf
 }
 
-fn draw_bg_gradient(bg_type: i32, w: i32, h: i32, fb: *mut u32) {
+#[no_mangle]
+pub extern fn rast_get_num_backgrounds() -> i32 { 5 }
+
+fn draw_bg_gradient(bg_idx: i32, w: i32, h: i32, fb: *mut u32) {
     // Fill the framebuffer with a vertical gradient
 
     let start;
     let end;
-    match bg_type % 5 {
+    match bg_idx {
         0 => { start = Vec3::new(0.3, 0.3, 0.3); end = Vec3::new(0.7, 0.7, 0.7); }
         1 => { start = Vec3::new(1.0, 0.4, 0.0); end = Vec3::new(0.0, 0.5, 0.5); }
         2 => { start = Vec3::new(1.0, 0.0, 1.0); end = Vec3::new(1.0, 0.0, 1.0); }
         3 => { start = Vec3::new(1.0, 1.0, 1.0); end = Vec3::new(1.0, 1.0, 1.0); }
-        _ => { start = Vec3::new(0.0, 0.0, 0.0); end = Vec3::new(0.0, 0.0, 0.0); }
+        4 => { start = Vec3::new(0.0, 0.0, 0.0); end = Vec3::new(0.0, 0.0, 0.0); }
+        _ => panic!("draw_bg_gradient: Invalid index: {}", bg_idx)
     }
 
     for y in 0..h {
@@ -733,19 +858,38 @@ fn reflect(i: &Vec3<f32>, n: &Vec3<f32>) -> Vec3<f32> {
     *i - (*n * na::dot(n, i) * 2.0)
 }
 
+#[no_mangle]
+pub extern fn rast_get_num_shaders() -> i32 { 4 }
+
+#[no_mangle]
+pub extern fn rast_get_shader_name(idx: i32) -> *const u8 { shader_by_idx(idx).0.as_ptr() }
+
+fn shader_by_idx<'a>(idx: i32) -> (&'a str, bool, Shader) {
+   // Retrieve shader name, cube map usage and function by its index
+   match idx  {
+       0 => ("BakedColor\0"       , false, shader_color       ),
+       1 => ("Normals\0"          , false, shader_n_to_color  ),
+       2 => ("Plastic2xDirLight\0", false, shader_dir_light_ao),
+       3 => ("CMRefl\0"           , true , shader_cm_refl     ),
+       _ => panic!("shader_by_idx: Invalid index: {}", idx)
+   }
+}
+
 // All shaders have this signature
-type Shader = fn(&Vec3<f32>, // World space position
-                 &Vec3<f32>, // World space normal
-                 &Vec3<f32>, // Color
-                 &Pnt3<f32>, // World space camera position
-                 f64) ->     // Current time (tick)
-                 Vec3<f32>;  // Output color
+type Shader = fn(&Vec3<f32>,          // World space position
+                 &Vec3<f32>,          // World space normal
+                 &Vec3<f32>,          // Color
+                 &Pnt3<f32>,          // World space camera position
+                 f64,                 // Current time (tick)
+                 &IrradianceCMSet) -> // Selected environment
+                 Vec3<f32>;           // Output color
 
 fn shader_color(_p: &Vec3<f32>,
                 _n: &Vec3<f32>,
                 col: &Vec3<f32>,
                 _eye: &Pnt3<f32>,
-                _tick: f64) -> Vec3<f32> {
+                _tick: f64,
+                _cm: &IrradianceCMSet) -> Vec3<f32> {
     // Just use the static mesh color
     *col
 }
@@ -754,7 +898,8 @@ fn shader_n_to_color(_p: &Vec3<f32>,
                      n: &Vec3<f32>,
                      _col: &Vec3<f32>,
                      _eye: &Pnt3<f32>,
-                     _tick: f64) -> Vec3<f32> {
+                     _tick: f64,
+                     _cm: &IrradianceCMSet) -> Vec3<f32> {
     // Convert the normal to a color
     (n.normalize() + 1.0) * 0.5
 }
@@ -763,7 +908,8 @@ fn shader_dir_light_ao(p: &Vec3<f32>,
                        n: &Vec3<f32>,
                        col: &Vec3<f32>,
                        eye: &Pnt3<f32>,
-                       _tick: f64) -> Vec3<f32> {
+                       _tick: f64,
+                       _cm: &IrradianceCMSet) -> Vec3<f32> {
     // Specular material lit by two light sources, mesh color is treated as AO factor
 
     let n   = fast_normalize(n);
@@ -799,31 +945,15 @@ fn normalize_phong_lobe(power: f32) -> f32
     (power + 2.0) * 0.5
 }
 
-fn cm_from_tick<'a>(tick: f64) -> &'a IrradianceCMSet {
-    let cube_maps: [&IrradianceCMSet; 8] = [
-        &_CM_GRACE,
-        &_CM_PARKING_LOT,
-        &_CM_ENIS,
-        &_CM_GLACIER,
-        &_CM_PISA,
-        &_CM_PINE_TREE,
-        &_CM_UFFIZI,
-        &_CM_DOGE
-    ];
-
-    cube_maps[(tick / 3.0) as usize % cube_maps.len()]
-}
-
 fn shader_cm_refl(p: &Vec3<f32>,
                   n: &Vec3<f32>,
                   col: &Vec3<f32>,
                   eye: &Pnt3<f32>,
-                  tick: f64) -> Vec3<f32> {
+                  _tick: f64,
+                  cm: &IrradianceCMSet) -> Vec3<f32> {
     let n   = fast_normalize(n);
     let eye = *p - *eye.as_vec();
     let r   = &reflect(&eye, &n);
-
-    let cm = cm_from_tick(tick);
 
     (
       lookup_cm(&cm.cos_1,   &n)                              * 1.0
@@ -943,99 +1073,6 @@ fn fast_unit_pow16(v: f32) -> f32 {
             unsafe { * TBL.get_unchecked(idx as usize) }
         }
     }
-}
-
-fn mesh_from_enum<'a>(scene: Scene) -> &'a Mesh {
-    match scene {
-        Scene::Cube       => &CUBE_MESH,
-        Scene::Sphere     => &SPHERE_MESH,
-        Scene::CornellBox => &CORNELL_MESH,
-        Scene::Head       => &HEAD_MESH,
-        Scene::TorusKnot  => &TORUS_KNOT_MESH,
-        Scene::Killeroo   => &KILLEROO_MESH,
-        Scene::Hand       => &HAND_MESH,
-        Scene::Cat        => &CAT_MESH,
-        Scene::Teapot     => &TEAPOT_MESH,
-        Scene::Dwarf      => &DWARF_MESH,
-        Scene::Blob       => &BLOB_MESH
-    }
-}
-
-fn smootherstep(edge0: f32, edge1: f32, x: f32) -> f32
-{
-    // Scale and clamp x to 0..1 range
-    let x = na::clamp((x - edge0) / (edge1 - edge0), 0.0, 1.0);
-    // Evaluate polynomial
-    x * x * x * (x * (x * 6.0 - 15.0) + 10.0)
-}
-
-fn build_scene<'a>(scene: Scene, tick: f64) -> (&'a Mesh, Shader, Pnt3<f32>) {
-    // Build a scene (mesh, shader, camera position)
-
-    let mesh = mesh_from_enum(scene);
-
-    let shader: Shader = match scene {
-        Scene::Cube       => shader_color,
-        Scene::Sphere     => shader_n_to_color,
-        Scene::CornellBox => shader_color,
-        Scene::Head       => shader_cm_refl,
-        Scene::TorusKnot  => shader_dir_light_ao,
-        Scene::Killeroo   => shader_cm_refl,
-        Scene::Hand       => shader_color,
-        Scene::Cat        => shader_dir_light_ao,
-        Scene::Teapot     => shader_cm_refl,
-        Scene::Dwarf      => shader_cm_refl,
-        Scene::Blob       => shader_dir_light_ao
-    };
-
-    let eye = match scene {
-        Scene::Cube      |
-        Scene::Sphere    |
-        Scene::TorusKnot |
-        Scene::Blob =>
-            // Orbit around object
-            Pnt3::new(((tick / 1.25).cos() * 1.8) as f32,
-                      0.0,
-                      ((tick / 1.25).sin() * 1.8) as f32),
-
-        Scene::Head |
-        Scene::Hand |
-        Scene::Cat  |
-        Scene::Teapot =>
-            // Orbit closer around object
-            Pnt3::new(((tick / 1.25).cos() * 1.6) as f32,
-                      0.0,
-                      ((tick / 1.25).sin() * 1.6) as f32),
-
-        Scene::Dwarf |
-        Scene::Killeroo => {
-            // Slow, dampened pan around the front of the object,
-            // some slow vertical bobbing as well
-            let tick_slow = tick / 3.5;
-            let reverse   = tick_slow as i64 % 2 == 1;
-            let tick_f    = if reverse {
-                                1.0 - tick_slow.fract()
-                            } else {
-                                tick_slow.fract()
-                            } as f32;
-            let smooth    = smootherstep(0.0, 1.0, tick_f);
-            let a_weight  = 1.0 - smooth;
-            let b_weight  = smooth;
-            let tick_seg  = -consts::PI / 2.0 -
-                            (-(consts::PI / 6.0) * a_weight + (consts::PI / 6.0) * b_weight);
-            Pnt3::new(tick_seg.cos() as f32,
-                      ((tick / 2.0).sin() * 0.25 + 0.2) as f32,
-                      tick_seg.sin() as f32)
-        }
-
-        Scene::CornellBox =>
-            // Camera makes circular motion looking at the box (which is open at the back)
-            Pnt3::new((tick.cos() * 0.3) as f32,
-                      (tick.sin() * 0.3) as f32,
-                      -2.0)
-    };
-
-    (mesh, shader, eye)
 }
 
 // 11bit gamma 2.2 correction LUT, fits in 2KB and just about good enough
@@ -1217,27 +1254,13 @@ fn rgbf_to_abgr32(r: f32, g: f32, b: f32) -> u32 {
 #[derive(PartialEq)]
 pub enum RenderMode { Point, Line, Fill }
 
-#[repr(i32)]
-#[derive(Copy, Clone)]
-pub enum Scene {
-    Cube,
-    Sphere,
-    CornellBox,
-    Head,
-    TorusKnot,
-    Killeroo,
-    Hand,
-    Cat,
-    Teapot,
-    Dwarf,
-    Blob
-}
-
 #[no_mangle]
 pub extern fn rast_draw(shade_per_pixel: i32,
                         mode: RenderMode,
-                        scene: Scene,
-                        bg_type: i32,
+                        mesh_idx: i32,
+                        shader_idx: i32,
+                        env_map_idx: i32,
+                        bg_idx: i32,
                         tick: f64,
                         w: i32,
                         h: i32,
@@ -1249,8 +1272,12 @@ pub extern fn rast_draw(shade_per_pixel: i32,
 
     // let tick: f64 = 0.0;
 
-    // Scene
-    let (mesh, shader, eye) = build_scene(scene, tick);
+    // Scene (mesh, camera, shader, environment, background)
+    let (_, camera, mesh)    = mesh_by_idx(mesh_idx);
+    let eye                  = camera(tick);
+    let (_, show_cm, shader) = shader_by_idx(shader_idx);
+    let (_, cm)              = cm_set_by_idx(env_map_idx);
+    draw_bg_gradient(bg_idx, w, h, fb);
 
     // Transform
     let mut vtx_transf = transform_vertices(&mesh, w, h, &eye);
@@ -1258,12 +1285,9 @@ pub extern fn rast_draw(shade_per_pixel: i32,
     // Do vertex shading?
     if !shade_per_pixel && mode == RenderMode::Fill {
         for vtx in &mut vtx_transf {
-            vtx.col = shader(&vtx.world, &vtx.n, &vtx.col, &eye, tick);
+            vtx.col = shader(&vtx.world, &vtx.n, &vtx.col, &eye, tick, cm);
         }
     }
-
-    // Background gradient
-    draw_bg_gradient(bg_type, w, h, fb);
 
     // Draw
     match mode {
@@ -1447,7 +1471,7 @@ pub extern fn rast_draw(shade_per_pixel: i32,
                                                 * n2 * inv_w_2 * b0) * w_raster;
 
                                 // Call shader
-                                shader(&p_raster, &n_raster, &c_raster, &eye, tick)
+                                shader(&p_raster, &n_raster, &c_raster, &eye, tick, cm)
                             } else {
                                 // Just write interpolated per-vertex shading result
                                 c_raster
@@ -1465,7 +1489,8 @@ pub extern fn rast_draw(shade_per_pixel: i32,
     }
 
     // Cube map unfolded LDR preview overlay
-    let cm = cm_from_tick(tick);
-    cm.draw_cross(10, 10, w, h, fb);
+    if show_cm {
+        cm.draw_cross(10, 10, w, h, fb);
+    }
 }
 

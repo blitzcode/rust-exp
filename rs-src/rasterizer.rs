@@ -7,8 +7,11 @@ use std::fs::File;
 use std::error::Error;
 use std::io::prelude::*;
 use std::f32;
+use std::i64;
 use std::f32::consts;
 use stb_image::image;
+use time::{PreciseTime};
+use std::cmp;
 
 //
 // ------------------------------------------
@@ -1440,6 +1443,65 @@ static GAMMA_11BIT_LUT: [u8; 2048] = [
 // Rasterizer
 // ----------
 //
+
+#[no_mangle]
+pub extern fn rast_benchmark() {
+    // Allocate framebuffer
+    let w = 512;
+    let h = 512;
+    let mut fb: Vec<u32> = Vec::new();
+    fb.resize((w * h) as usize, 0);
+    let fb_ptr = fb.as_mut_ptr();
+
+    // Benchmark name, reference and function
+    let benchmarks:[(&str, i64, &Fn() -> ()); 6] = [
+        ("Killeroo"  , 9675  , &|| rast_draw(0, RenderMode::Fill, 0, 0,  0, 0, 0.0, w, h, fb_ptr)),
+        ("Head"      , 7997  , &|| rast_draw(0, RenderMode::Fill, 0, 1,  0, 0, 0.0, w, h, fb_ptr)),
+        ("Hand"      , 4626  , &|| rast_draw(0, RenderMode::Fill, 0, 4,  0, 0, 0.0, w, h, fb_ptr)),
+        ("TorusKnot" , 20155 , &|| rast_draw(0, RenderMode::Fill, 0, 6,  0, 0, 0.0, w, h, fb_ptr)),
+        ("Cube"      , 9414  , &|| rast_draw(0, RenderMode::Fill, 0, 9,  0, 0, 0.0, w, h, fb_ptr)),
+        ("CornellBox", 9423  , &|| rast_draw(0, RenderMode::Fill, 0, 11, 0, 0, 0.0, w, h, fb_ptr))
+    ];
+
+    // Run once to all the one-time initialization etc. is done
+    for i in 0..benchmarks.len() { benchmarks[i].2(); }
+
+    // Vector storing the best time
+    let mut timings: Vec<i64> = Vec::new();
+    timings.resize(benchmarks.len(), i64::MAX);
+
+    // Run all benchmarks multiple times
+    let num_runs = 25;
+    for _ in 0..num_runs  {
+        for i in 0..benchmarks.len() {
+            // Measure and run
+            let bench_fun = benchmarks[i].2;
+            let start = PreciseTime::now();
+            bench_fun();
+            let end = PreciseTime::now();
+
+            // Best time?
+            timings[i] = cmp::min(timings[i], start.to(end).num_microseconds().unwrap());
+        }
+    }
+
+    // Result table
+    println!("\nBenchmarks (best time out of {} runs)\n", num_runs);
+    println!("      Name      | Reference |    Now    | %-Diff ");
+    println!("-------------------------------------------------");
+    for i in 0..benchmarks.len() {
+        let time_ref = benchmarks[i].1;
+        let time_now = timings[i];
+        let time_diff = time_now - time_ref;
+        let percent_diff = (time_diff as f64 / time_ref as f64) * 100.0;
+        println!("{:<16} {:>7.2}ms   {:>7.2}ms    {:>+6.2}%",
+                 benchmarks[i].0,
+                 time_ref as f64 / 1000.0,
+                 time_now as f64 / 1000.0,
+                 percent_diff);
+    }
+    println!("");
+}
 
 #[repr(i32)]
 #[derive(PartialEq)]

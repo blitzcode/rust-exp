@@ -1455,12 +1455,12 @@ pub extern fn rast_benchmark() {
 
     // Benchmark name, reference and function
     let benchmarks:[(&str, i64, &Fn() -> ()); 6] = [
-        ("Killeroo"  , 9675  , &|| rast_draw(0, RenderMode::Fill, 0, 0,  0, 0, 0.0, w, h, fb_ptr)),
-        ("Head"      , 7997  , &|| rast_draw(0, RenderMode::Fill, 0, 1,  0, 0, 0.0, w, h, fb_ptr)),
-        ("Hand"      , 4626  , &|| rast_draw(0, RenderMode::Fill, 0, 4,  0, 0, 0.0, w, h, fb_ptr)),
-        ("TorusKnot" , 20155 , &|| rast_draw(0, RenderMode::Fill, 0, 6,  0, 0, 0.0, w, h, fb_ptr)),
-        ("Cube"      , 9414  , &|| rast_draw(0, RenderMode::Fill, 0, 9,  0, 0, 0.0, w, h, fb_ptr)),
-        ("CornellBox", 9423  , &|| rast_draw(0, RenderMode::Fill, 0, 11, 0, 0, 0.0, w, h, fb_ptr))
+        ("Killeroo"  , 4861, &|| rast_draw(0, RenderMode::Fill, 0, 0 , 0, 0, 0.0, w, h, fb_ptr)),
+        ("Head"      , 5139, &|| rast_draw(0, RenderMode::Fill, 0, 1 , 0, 0, 0.0, w, h, fb_ptr)),
+        ("Hand"      , 5753, &|| rast_draw(0, RenderMode::Fill, 0, 4 , 0, 0, 0.0, w, h, fb_ptr)),
+        ("TorusKnot" , 7307, &|| rast_draw(0, RenderMode::Fill, 0, 6 , 0, 0, 0.0, w, h, fb_ptr)),
+        ("Cube"      , 6573, &|| rast_draw(0, RenderMode::Fill, 0, 9 , 0, 0, 0.0, w, h, fb_ptr)),
+        ("CornellBox", 6563, &|| rast_draw(0, RenderMode::Fill, 0, 11, 0, 0, 0.0, w, h, fb_ptr))
     ];
 
     // Run once to all the one-time initialization etc. is done
@@ -1487,17 +1487,17 @@ pub extern fn rast_benchmark() {
 
     // Result table
     println!("\nBenchmarks (best time out of {} runs)\n", num_runs);
-    println!("      Name      | Reference |    Now    | %-Diff ");
+    println!("Name            | Ref    | Now    | %-Diff ");
     println!("-------------------------------------------------");
     for i in 0..benchmarks.len() {
-        let time_ref = benchmarks[i].1;
-        let time_now = timings[i];
-        let time_diff = time_now - time_ref;
+        let time_ref     = benchmarks[i].1;
+        let time_now     = timings[i];
+        let time_diff    = time_now - time_ref;
         let percent_diff = (time_diff as f64 / time_ref as f64) * 100.0;
-        println!("{:<16} {:>7.2}ms   {:>7.2}ms    {:>+6.2}%",
+        println!("{:<16} {:>5}μs  {:>5}μs  {:>+6.2}%",
                  benchmarks[i].0,
-                 time_ref as f64 / 1000.0,
-                 time_now as f64 / 1000.0,
+                 time_ref,
+                 time_now,
                  percent_diff);
     }
     println!("");

@@ -14,7 +14,7 @@ type V3F = Vec3<f32>;
 type P3F = Pnt3<f32>;
 
 #[no_mangle]
-pub extern fn rast_get_num_meshes() -> i32 { 11 }
+pub extern fn rast_get_num_meshes() -> i32 { 12 }
 
 #[no_mangle]
 pub extern fn rast_get_mesh_name(idx: i32) -> *const u8 { mesh_by_idx(idx).0.as_ptr() }
@@ -29,44 +29,47 @@ fn mesh_by_idx<'a>(idx: i32) -> (&'a str, CameraFromTime, &'a Mesh) {
 
     // Mesh geometry
     lazy_static! {
+        static ref MESH_KILLEROO: Mesh =
+            load_mesh("meshes/killeroo_ao.dat"      , MeshFileType::XyzNxNyNzRGB);
+        static ref MESH_HEAD: Mesh =
+            load_mesh("meshes/head_ao.dat"          , MeshFileType::XyzNxNyNzRGB);
+        static ref MESH_MITSUBA: Mesh =
+            load_mesh("meshes/mitsuba_ao.dat"       , MeshFileType::XyzNxNyNzRGB);
+        static ref MESH_CAT: Mesh =
+            load_mesh("meshes/cat_ao.dat"           , MeshFileType::XyzNxNyNzRGB);
+        static ref MESH_HAND: Mesh =
+            load_mesh("meshes/hand_ao.dat"          , MeshFileType::XyzNxNyNzRGB);
+        static ref MESH_TEAPOT: Mesh =
+            load_mesh("meshes/teapot.dat"           , MeshFileType::XyzNxNyNz   );
+        static ref MESH_TORUS_KNOT: Mesh =
+            load_mesh("meshes/torus_knot.dat"       , MeshFileType::XyzNxNyNz   );
+        static ref MESH_DWARF: Mesh =
+            load_mesh("meshes/dwarf.dat"            , MeshFileType::XyzNxNyNzRGB);
+        static ref MESH_BLOB: Mesh =
+            load_mesh("meshes/blob.dat"             , MeshFileType::XyzNxNyNz   );
         static ref MESH_CUBE: Mesh =
             load_mesh("meshes/cube.dat"             , MeshFileType::XyzNxNyNzRGB);
         static ref MESH_SPHERE: Mesh =
             load_mesh("meshes/sphere.dat"           , MeshFileType::XyzNxNyNz   );
         static ref MESH_CORNELL: Mesh =
             load_mesh("meshes/cornell_radiosity.dat", MeshFileType::XyzRGB      );
-        static ref MESH_HEAD: Mesh =
-            load_mesh("meshes/head_ao.dat"          , MeshFileType::XyzNxNyNzRGB);
-        static ref MESH_TORUS_KNOT: Mesh =
-            load_mesh("meshes/torus_knot.dat"       , MeshFileType::XyzNxNyNz   );
-        static ref MESH_KILLEROO: Mesh =
-            load_mesh("meshes/killeroo_ao.dat"      , MeshFileType::XyzNxNyNzRGB);
-        static ref MESH_HAND: Mesh =
-            load_mesh("meshes/hand_ao.dat"          , MeshFileType::XyzNxNyNzRGB);
-        static ref MESH_CAT: Mesh =
-            load_mesh("meshes/cat_ao.dat"           , MeshFileType::XyzNxNyNzRGB);
-        static ref MESH_TEAPOT: Mesh =
-            load_mesh("meshes/teapot.dat"           , MeshFileType::XyzNxNyNz   );
-        static ref MESH_DWARF: Mesh =
-            load_mesh("meshes/dwarf.dat"            , MeshFileType::XyzNxNyNzRGB);
-        static ref MESH_BLOB: Mesh =
-            load_mesh("meshes/blob.dat"             , MeshFileType::XyzNxNyNz   );
     }
 
     // Name, camera and geometry tuple
     match idx {
         // Null terminated names so we can easily pass them as C strings
-        0  => ("Cube\0"      , cam_orbit,        &MESH_CUBE      ),
-        1  => ("Sphere\0"    , cam_orbit,        &MESH_SPHERE    ),
-        2  => ("CornellBox\0", cam_pan_front,    &MESH_CORNELL   ),
-        3  => ("Head\0"      , cam_orbit_closer, &MESH_HEAD      ),
-        4  => ("TorusKnot\0" , cam_orbit,        &MESH_TORUS_KNOT),
-        5  => ("Killeroo\0"  , cam_orbit_front,  &MESH_KILLEROO  ),
-        6  => ("Hand\0"      , cam_orbit_closer, &MESH_HAND      ),
-        7  => ("Cat\0"       , cam_orbit_closer, &MESH_CAT       ),
-        8  => ("Teapot\0"    , cam_orbit_closer, &MESH_TEAPOT    ),
-        9  => ("Dwarf\0"     , cam_orbit_front,  &MESH_DWARF     ),
-        10 => ("Blob\0"      , cam_orbit,        &MESH_BLOB      ),
+        0  => ("Killeroo\0"  , cam_orbit_front,  &MESH_KILLEROO  ),
+        1  => ("Head\0"      , cam_orbit_closer, &MESH_HEAD      ),
+        2  => ("Mitsuba\0"   , cam_pan_front,    &MESH_MITSUBA   ),
+        3  => ("Cat\0"       , cam_orbit_closer, &MESH_CAT       ),
+        4  => ("Hand\0"      , cam_orbit_closer, &MESH_HAND      ),
+        5  => ("Teapot\0"    , cam_orbit_closer, &MESH_TEAPOT    ),
+        6  => ("TorusKnot\0" , cam_orbit,        &MESH_TORUS_KNOT),
+        7  => ("Dwarf\0"     , cam_orbit_front,  &MESH_DWARF     ),
+        8  => ("Blob\0"      , cam_orbit,        &MESH_BLOB      ),
+        9  => ("Cube\0"      , cam_orbit,        &MESH_CUBE      ),
+        10 => ("Sphere\0"    , cam_orbit,        &MESH_SPHERE    ),
+        11 => ("CornellBox\0", cam_pan_back ,    &MESH_CORNELL   ),
         _  => panic!("mesh_by_idx: Invalid index: {}", idx)
     }
 }
@@ -108,6 +111,13 @@ fn cam_orbit_front(tick: f64) -> P3F {
 }
 
 fn cam_pan_front(tick: f64) -> P3F {
+    // Camera makes circular motion looking at the mesh
+    Pnt3::new((tick.cos() * 0.3) as f32,
+              (tick.sin() * 0.3) as f32 + 0.4,
+              1.7)
+}
+
+fn cam_pan_back(tick: f64) -> P3F {
     // Camera makes circular motion looking at the box (which is open at the back)
     Pnt3::new((tick.cos() * 0.3) as f32,
               (tick.sin() * 0.3) as f32,
@@ -1077,7 +1087,7 @@ fn shader_cm_gold(p: &V3F, n: &V3F, col: &V3F, eye: &P3F, _tick: f64,
     let albedo = Vec3::new(1.0, 0.76, 0.33);
 
     ( lookup_cm(&cm.cos_1  , &n)                               * ldotn
-    + lookup_cm(&cm.cos_8  , &r) * normalize_phong_lobe(8.0  ) 
+    + lookup_cm(&cm.cos_8  , &r) * normalize_phong_lobe(8.0  )
     + lookup_cm(&cm.cos_512, &r) * normalize_phong_lobe(512.0) * (1.0 - ldotn)
     )
     * albedo * (*col * *col)

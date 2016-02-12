@@ -68,7 +68,7 @@ instance Experiment RustRasterizerExperiment where
         f $ RustRasterizerExperiment { _rrTimes         = BS.empty 60
                                      , _rrShadePerPixel = False
                                      , _rrMode          = Fill
-                                     , _rrMeshIdx       = Index 5 (num_mesh   - 1)
+                                     , _rrMeshIdx       = Index 0 (num_mesh   - 1)
                                      , _rrShaderIdx     = Index 5 (num_shader - 1)
                                      , _rrCMIdx         = Index 0 (num_cm     - 1)
                                      , _rrBgIdx         = Index 0 (num_bg     - 1)

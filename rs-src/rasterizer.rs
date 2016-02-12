@@ -1534,6 +1534,7 @@ pub extern fn rast_draw(shade_per_pixel: i32,
 
     // Transform
     let mut vtx_transf = transform_vertices(&mesh, w, h, &eye);
+    let vtx_transf_ptr = vtx_transf.as_ptr();
 
     // Do vertex shading?
     if !shade_per_pixel && mode == RenderMode::Fill {
@@ -1582,9 +1583,9 @@ pub extern fn rast_draw(shade_per_pixel: i32,
 
             for t in &mesh.tri {
                 // Triangle vertices
-                let vtx0 = &vtx_transf[t.v0 as usize];
-                let vtx1 = &vtx_transf[t.v1 as usize];
-                let vtx2 = &vtx_transf[t.v2 as usize];
+                let vtx0 = unsafe { &*vtx_transf_ptr.offset(t.v0 as isize) };
+                let vtx1 = unsafe { &*vtx_transf_ptr.offset(t.v1 as isize) };
+                let vtx2 = unsafe { &*vtx_transf_ptr.offset(t.v2 as isize) };
 
                 // Break out positions (viewport and world), colors and normals
                 let v0 = &vtx0.vp; let p0 = &vtx0.world; let c0 = &vtx0.col; let n0 = &vtx0.n;

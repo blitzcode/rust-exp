@@ -693,16 +693,19 @@ fn lookup_cm(cm: &CM, dir: &V3F) -> V3F {
     // Find major axis
     if dir_abs.x > dir_abs.y && dir_abs.x > dir_abs.z {
         face = if dir.x > 0.0 { CMFaceName::XPos } else { CMFaceName::XNeg };
-        u    = dir.z / dir_abs.x;
-        v    = dir.y / dir_abs.x;
+        let inv_dir_abs = 1.0 / dir_abs.x;
+        u    = dir.z * inv_dir_abs;
+        v    = dir.y * inv_dir_abs;
     } else if dir_abs.y > dir_abs.x && dir_abs.y > dir_abs.z {
         face = if dir.y > 0.0 { CMFaceName::YPos } else { CMFaceName::YNeg };
-        u    = dir.x / dir_abs.y;
-        v    = dir.z / dir_abs.y;
+        let inv_dir_abs = 1.0 / dir_abs.y;
+        u    = dir.x * inv_dir_abs;
+        v    = dir.z * inv_dir_abs;
     } else {
         face = if dir.z > 0.0 { CMFaceName::ZPos } else { CMFaceName::ZNeg };
-        u    = dir.x / dir_abs.z;
-        v    = dir.y / dir_abs.z;
+        let inv_dir_abs = 1.0 / dir_abs.z;
+        u    = dir.x * inv_dir_abs;
+        v    = dir.y * inv_dir_abs;
     }
 
     // Face texel coordinates
@@ -713,7 +716,7 @@ fn lookup_cm(cm: &CM, dir: &V3F) -> V3F {
 
     // Lookup
     let idx = tx + ty * CM_FACE_WDH;
-    cm[face as usize][idx as usize]
+    unsafe { *cm.get_unchecked(face as usize).get_unchecked(idx as usize) }
 }
 
 #[no_mangle]

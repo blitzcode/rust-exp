@@ -1462,12 +1462,12 @@ pub extern fn rast_benchmark() {
 
     // Benchmark name, reference and function
     let benchmarks:[(&str, i64, &Fn() -> ()); 6] = [
-        ("Killeroo"  , 3682, &|| rast_draw(1, RenderMode::Fill, 0 , 5, 0, 0, 0.0, w, h, fb_ptr)),
-        ("Head"      , 5848, &|| rast_draw(1, RenderMode::Fill, 1 , 5, 0, 0, 0.0, w, h, fb_ptr)),
-        ("Hand"      , 2031, &|| rast_draw(1, RenderMode::Fill, 4 , 5, 0, 0, 0.0, w, h, fb_ptr)),
-        ("TorusKnot" , 3331, &|| rast_draw(1, RenderMode::Fill, 6 , 5, 0, 0, 0.0, w, h, fb_ptr)),
-        ("Cube"      , 2250, &|| rast_draw(1, RenderMode::Fill, 9 , 5, 0, 0, 0.0, w, h, fb_ptr)),
-        ("CornellBox", 3145, &|| rast_draw(1, RenderMode::Fill, 11, 5, 0, 0, 0.0, w, h, fb_ptr))
+        ("Killeroo"  , 12329, &|| rast_draw(1, RenderMode::Fill, 0 , 5, 0, 0, 0.0, w, h, fb_ptr)),
+        ("Head"      , 22510, &|| rast_draw(1, RenderMode::Fill, 1 , 5, 0, 0, 0.0, w, h, fb_ptr)),
+        ("Hand"      , 10105, &|| rast_draw(1, RenderMode::Fill, 4 , 5, 0, 0, 0.0, w, h, fb_ptr)),
+        ("TorusKnot" , 24509, &|| rast_draw(1, RenderMode::Fill, 6 , 5, 0, 0, 0.0, w, h, fb_ptr)),
+        ("Cube"      , 27681, &|| rast_draw(1, RenderMode::Fill, 9 , 5, 0, 0, 0.0, w, h, fb_ptr)),
+        ("CornellBox", 30641, &|| rast_draw(1, RenderMode::Fill, 11, 5, 0, 0, 0.0, w, h, fb_ptr))
     ];
 
     // Run once to all the one-time initialization etc. is done
@@ -1478,7 +1478,7 @@ pub extern fn rast_benchmark() {
     timings.resize(benchmarks.len(), i64::MAX);
 
     // Run all benchmarks multiple times
-    let num_runs = 25;
+    let num_runs = 20;
     for _ in 0..num_runs  {
         for i in 0..benchmarks.len() {
             // Measure and run
@@ -1581,7 +1581,6 @@ pub extern fn rast_draw(shade_per_pixel: i32,
 
     // Transform
     let mut vtx_transf = transform_vertices(&mesh, w, h, &eye);
-    let vtx_transf_ptr = vtx_transf.as_ptr();
 
     // Do vertex shading?
     if !shade_per_pixel && mode == RenderMode::Fill {
@@ -1630,14 +1629,14 @@ pub extern fn rast_draw(shade_per_pixel: i32,
 
             for t in &mesh.tri {
                 // Triangle vertices
-                let vtx0 = unsafe { &*vtx_transf_ptr.offset(t.v0 as isize) };
-                let vtx1 = unsafe { &*vtx_transf_ptr.offset(t.v1 as isize) };
-                let vtx2 = unsafe { &*vtx_transf_ptr.offset(t.v2 as isize) };
+                let vtx0 = unsafe { vtx_transf.get_unchecked(t.v0 as usize) };
+                let vtx1 = unsafe { vtx_transf.get_unchecked(t.v1 as usize) };
+                let vtx2 = unsafe { vtx_transf.get_unchecked(t.v2 as usize) };
 
                 // Break out positions (viewport and world), colors and normals
-                let v0 = &vtx0.vp; let p0 = &vtx0.world; let c0 = &vtx0.col; let n0 = &vtx0.n;
-                let v1 = &vtx1.vp; let p1 = &vtx1.world; let c1 = &vtx1.col; let n1 = &vtx1.n;
-                let v2 = &vtx2.vp; let p2 = &vtx2.world; let c2 = &vtx2.col; let n2 = &vtx2.n;
+                let v0 = vtx0.vp; let p0 = vtx0.world; let c0 = vtx0.col; let n0 = vtx0.n;
+                let v1 = vtx1.vp; let p1 = vtx1.world; let c1 = vtx1.col; let n1 = vtx1.n;
+                let v2 = vtx2.vp; let p2 = vtx2.world; let c2 = vtx2.col; let n2 = vtx2.n;
 
                 // Convert to 28.4 fixed-point. It would be most accurate to round() on
                 // these values, but that is extremely slow. Truncate will do, we're at
@@ -1796,21 +1795,21 @@ pub extern fn rast_draw(shade_per_pixel: i32,
 
                                 // Interpolate color. Perspective correct interpolation requires
                                 // us to linearly interpolate col/w and then multiply by w
-                                let c_raster = (* c0 * inv_w_0 * b1 +
-                                                * c1 * inv_w_1 * b2 +
-                                                * c2 * inv_w_2 * b0) * w_raster;
+                                let c_raster = (c0 * inv_w_0 * b1 +
+                                                c1 * inv_w_1 * b2 +
+                                                c2 * inv_w_2 * b0) * w_raster;
 
                                 // Shading
                                 let out = if shade_per_pixel {
                                     // Also do perspective correct interpolation of the
                                     // vertex normal and world space position, the shader
                                     // might want these
-                                    let p_raster = (* p0 * inv_w_0 * b1 +
-                                                    * p1 * inv_w_1 * b2 +
-                                                    * p2 * inv_w_2 * b0) * w_raster;
-                                    let n_raster = (* n0 * inv_w_0 * b1 +
-                                                    * n1 * inv_w_1 * b2 +
-                                                    * n2 * inv_w_2 * b0) * w_raster;
+                                    let p_raster = (p0 * inv_w_0 * b1 +
+                                                    p1 * inv_w_1 * b2 +
+                                                    p2 * inv_w_2 * b0) * w_raster;
+                                    let n_raster = (n0 * inv_w_0 * b1 +
+                                                    n1 * inv_w_1 * b2 +
+                                                    n2 * inv_w_2 * b0) * w_raster;
 
                                     // Call shader
                                     shader(&p_raster, &n_raster, &c_raster, &eye, tick, cm)

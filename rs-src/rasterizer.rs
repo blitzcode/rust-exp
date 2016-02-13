@@ -1109,7 +1109,6 @@ struct TransformedVertex {
     col:   V3F        // Color
 }
 
-//#[inline(always)]
 fn transform_vertices(mesh: &Mesh, w: i32, h: i32, eye: &P3F) -> Vec<TransformedVertex> {
     // Build a mesh to viewport transformation and return a transformed set of vertices
 
@@ -1456,12 +1455,12 @@ pub extern fn rast_benchmark() {
 
     // Benchmark name, reference and function
     let benchmarks:[(&str, i64, &Fn() -> ()); 6] = [
-        ("Killeroo"  , 3810, &|| rast_draw(1, RenderMode::Fill, 0 , 0, 0, 0, 0.0, w, h, fb_ptr)),
-        ("Head"      , 5811, &|| rast_draw(1, RenderMode::Fill, 1 , 0, 0, 0, 0.0, w, h, fb_ptr)),
-        ("Hand"      , 1480, &|| rast_draw(1, RenderMode::Fill, 4 , 0, 0, 0, 0.0, w, h, fb_ptr)),
-        ("TorusKnot" , 2535, &|| rast_draw(1, RenderMode::Fill, 6 , 0, 0, 0, 0.0, w, h, fb_ptr)),
-        ("Cube"      , 1169, &|| rast_draw(1, RenderMode::Fill, 9 , 0, 0, 0, 0.0, w, h, fb_ptr)),
-        ("CornellBox", 1892, &|| rast_draw(1, RenderMode::Fill, 11, 0, 0, 0, 0.0, w, h, fb_ptr))
+        ("Killeroo"  , 3382, &|| rast_draw(1, RenderMode::Fill, 0 , 0, 0, 0, 0.0, w, h, fb_ptr)),
+        ("Head"      , 5287, &|| rast_draw(1, RenderMode::Fill, 1 , 0, 0, 0, 0.0, w, h, fb_ptr)),
+        ("Hand"      , 1319, &|| rast_draw(1, RenderMode::Fill, 4 , 0, 0, 0, 0.0, w, h, fb_ptr)),
+        ("TorusKnot" , 2209, &|| rast_draw(1, RenderMode::Fill, 6 , 0, 0, 0, 0.0, w, h, fb_ptr)),
+        ("Cube"      , 1163, &|| rast_draw(1, RenderMode::Fill, 9 , 0, 0, 0, 0.0, w, h, fb_ptr)),
+        ("CornellBox", 1857, &|| rast_draw(1, RenderMode::Fill, 11, 0, 0, 0, 0.0, w, h, fb_ptr))
     ];
 
     // Run once to all the one-time initialization etc. is done
@@ -1661,14 +1660,13 @@ pub extern fn rast_draw(shade_per_pixel: i32,
                 let e1add = if dy12 > 0 || (dy12 == 0 && dx21 > 0) { 1 } else { 0 };
                 let e2add = if dy20 > 0 || (dy20 == 0 && dx02 > 0) { 1 } else { 0 };
 
-                // We take the obvious formulation of the cross product edge function
+                // We take the obvious formulation of the cross product edge functions
                 //
                 // hs0 = (x1 - x0) * (yf - y0) - (y1 - y0) * (xf - x0)
                 // hs1 = (x2 - x1) * (yf - y1) - (y2 - y1) * (xf - x1)
                 // hs2 = (x0 - x2) * (yf - y2) - (y0 - y2) * (xf - x2)
                 //
-                // and transform it into something more easily split based on its
-                // dependencies
+                // and transform it into something more easily split based on its dependencies
                 //
                 // hs0 = (y0 - y1) * xf + (x1 - x0) * yf + (x0 * y1 - y0 * x1)
                 // hs1 = (y1 - y2) * xf + (x2 - x1) * yf + (x1 * y2 - y1 * x2)
@@ -1677,10 +1675,12 @@ pub extern fn rast_draw(shade_per_pixel: i32,
                 // Now we can separate the constant part and split the x/y dependent terms
                 // into an initial value and one to add for every step in each loop direction
 
-                // Edge function constant
-                let e0c = x0 * y1 - y0 * x1 + e0add;
-                let e1c = x1 * y2 - y1 * x2 + e1add;
-                let e2c = x2 * y0 - y2 * x0 + e2add;
+                // Edge function constant. The '+ 1' is so we can change the inside-edge
+                // compare in the inner loop from > to >=, meaning we can just OR the
+                // signs of the edge functions
+                let e0c = x0 * y1 - y0 * x1 + e0add + 1;
+                let e1c = x1 * y2 - y1 * x2 + e1add + 1;
+                let e2c = x2 * y0 - y2 * x0 + e2add + 1;
 
                 // Starting value at AABB origin
                 let mut e0y = dy01 * (min_x << 4) + dx10 * (min_y << 4) + e0c;
@@ -1704,8 +1704,9 @@ pub extern fn rast_draw(shade_per_pixel: i32,
                         // cross product between an edge and a vector from the current
                         // raster position to the edge. The resulting vector will either
                         // point into or out of the screen, so we can check which side of
-                        // the edge we're on by the sign of the Z component
-                        if e0x > 0 && e1x > 0 && e2x > 0 {
+                        // the edge we're on by the sign of the Z component. See notes for
+                        // 'e[012]c' as for how we do the compare
+                        if e0x | e1x | e2x >= 0 {
                             // The cross product from the edge function not only tells us
                             // which side we're on, but also the area of parallelogram
                             // formed by the two vectors. We're basically getting twice
@@ -1714,10 +1715,11 @@ pub extern fn rast_draw(shade_per_pixel: i32,
                             // already barycentric coordinates, we just need to normalize
                             // them with the triangle area we already computed with the
                             // cross product for the backface culling test. Don't forget
-                            // to remove the fill convention bias applied earlier
-                            let b0 = (e0x - e0add) as f32 * inv_tri_a2;
-                            let b1 = (e1x - e1add) as f32 * inv_tri_a2;
-                            let b2 = (e2x - e2add) as f32 * inv_tri_a2;
+                            // to remove the fill convention (e[012]add) and comparison
+                            // (+1) bias applied earlier
+                            let b0 = (e0x - e0add - 1) as f32 * inv_tri_a2;
+                            let b1 = (e1x - e1add - 1) as f32 * inv_tri_a2;
+                            let b2 = (e2x - e2add - 1) as f32 * inv_tri_a2;
 
                             let idx = (x + y * w) as isize;
 

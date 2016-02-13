@@ -525,23 +525,25 @@ impl IrradianceCMSet {
 
     fn draw_cross(&self, xorg: i32, yorg: i32, w: i32, h: i32, fb: *mut u32) {
         // Draw the cross image into the given framebuffer
-        for y in 0..self.cross_hgt {
-            for x in 0..self.cross_wdh {
-                let fbx = xorg + x;
-                let fby = yorg + y;
 
-                if fbx < 0 || fbx >= w || fby < 0 || fby >= h { continue }
+        let x1 = na::clamp(xorg, 0, w);
+        let y1 = na::clamp(yorg, 0, h);
+        let x2 = cmp::min(x1 + self.cross_wdh, w);
+        let y2 = cmp::min(y1 + self.cross_hgt, h);
 
-                let fb_idx = (fbx + fby * w) as isize;
-                let cr_idx = (x + y * self.cross_wdh) as usize;
+        let cross_ptr = self.cross.as_ptr();
+
+        for y in y1..y2 {
+            let cy        = y - y1;
+            let fb_row    = y * w;
+            let cross_row = cy * self.cross_wdh - x1;
+            for x in x1..x2 {
+                let c  = unsafe { * cross_ptr.offset((cross_row + x) as isize) };
 
                 // Skip pixels not on the cross (alpha == 0)
-                let c = self.cross[cr_idx];
                 if c & 0xFF000000 == 0 { continue }
 
-                unsafe {
-                    * fb.offset(fb_idx) = c;
-                }
+                unsafe { * fb.offset((fb_row + x) as isize) = c }
             }
         }
     }
@@ -1457,12 +1459,12 @@ pub extern fn rast_benchmark() {
 
     // Benchmark name, reference and function
     let benchmarks:[(&str, i64, &Fn() -> ()); 6] = [
-        ("Killeroo"  , 3682, &|| rast_draw(1, RenderMode::Fill, 0 , 0, 0, 0, 0.0, w, h, fb_ptr)),
-        ("Head"      , 5848, &|| rast_draw(1, RenderMode::Fill, 1 , 0, 0, 0, 0.0, w, h, fb_ptr)),
-        ("Hand"      , 2031, &|| rast_draw(1, RenderMode::Fill, 4 , 0, 0, 0, 0.0, w, h, fb_ptr)),
-        ("TorusKnot" , 3331, &|| rast_draw(1, RenderMode::Fill, 6 , 0, 0, 0, 0.0, w, h, fb_ptr)),
-        ("Cube"      , 2250, &|| rast_draw(1, RenderMode::Fill, 9 , 0, 0, 0, 0.0, w, h, fb_ptr)),
-        ("CornellBox", 3145, &|| rast_draw(1, RenderMode::Fill, 11, 0, 0, 0, 0.0, w, h, fb_ptr))
+        ("Killeroo"  , 3682, &|| rast_draw(1, RenderMode::Fill, 0 , 5, 0, 0, 0.0, w, h, fb_ptr)),
+        ("Head"      , 5848, &|| rast_draw(1, RenderMode::Fill, 1 , 5, 0, 0, 0.0, w, h, fb_ptr)),
+        ("Hand"      , 2031, &|| rast_draw(1, RenderMode::Fill, 4 , 5, 0, 0, 0.0, w, h, fb_ptr)),
+        ("TorusKnot" , 3331, &|| rast_draw(1, RenderMode::Fill, 6 , 5, 0, 0, 0.0, w, h, fb_ptr)),
+        ("Cube"      , 2250, &|| rast_draw(1, RenderMode::Fill, 9 , 5, 0, 0, 0.0, w, h, fb_ptr)),
+        ("CornellBox", 3145, &|| rast_draw(1, RenderMode::Fill, 11, 5, 0, 0, 0.0, w, h, fb_ptr))
     ];
 
     // Run once to all the one-time initialization etc. is done

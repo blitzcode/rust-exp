@@ -1456,12 +1456,12 @@ pub extern fn rast_benchmark() {
 
     // Benchmark name, reference and function
     let benchmarks:[(&str, i64, &Fn() -> ()); 6] = [
-        ("Killeroo"  , 2714, &|| rast_draw(1, RenderMode::Fill, 0 , 0, 0, 0, 0.0, w, h, fb_ptr)),
-        ("Head"      , 4198, &|| rast_draw(1, RenderMode::Fill, 1 , 0, 0, 0, 0.0, w, h, fb_ptr)),
-        ("Hand"      , 1170, &|| rast_draw(1, RenderMode::Fill, 4 , 0, 0, 0, 0.0, w, h, fb_ptr)),
-        ("TorusKnot" , 2140, &|| rast_draw(1, RenderMode::Fill, 6 , 0, 0, 0, 0.0, w, h, fb_ptr)),
-        ("Cube"      , 1151, &|| rast_draw(1, RenderMode::Fill, 9 , 0, 0, 0, 0.0, w, h, fb_ptr)),
-        ("CornellBox", 1811, &|| rast_draw(1, RenderMode::Fill, 11, 0, 0, 0, 0.0, w, h, fb_ptr))
+        ("Killeroo"  , 3682, &|| rast_draw(1, RenderMode::Fill, 0 , 0, 0, 0, 0.0, w, h, fb_ptr)),
+        ("Head"      , 5848, &|| rast_draw(1, RenderMode::Fill, 1 , 0, 0, 0, 0.0, w, h, fb_ptr)),
+        ("Hand"      , 2031, &|| rast_draw(1, RenderMode::Fill, 4 , 0, 0, 0, 0.0, w, h, fb_ptr)),
+        ("TorusKnot" , 3331, &|| rast_draw(1, RenderMode::Fill, 6 , 0, 0, 0, 0.0, w, h, fb_ptr)),
+        ("Cube"      , 2250, &|| rast_draw(1, RenderMode::Fill, 9 , 0, 0, 0, 0.0, w, h, fb_ptr)),
+        ("CornellBox", 3145, &|| rast_draw(1, RenderMode::Fill, 11, 0, 0, 0, 0.0, w, h, fb_ptr))
     ];
 
     // Run once to all the one-time initialization etc. is done
@@ -1701,6 +1701,8 @@ pub extern fn rast_draw(shade_per_pixel: i32,
                     let mut e1x = e1y;
                     let mut e2x = e2y;
 
+                    let idx_y = y * w;
+
                     for x in min_x..max_x {
                         // Check the half-space functions for all three edges to see if
                         // we're inside the triangle. These functions are basically just a
@@ -1724,7 +1726,7 @@ pub extern fn rast_draw(shade_per_pixel: i32,
                             let b1 = (e1x - e1add - 1) as f32 * inv_tri_a2;
                             let b2 = (e2x - e2add - 1) as f32 * inv_tri_a2;
 
-                            let idx = (x + y * w) as isize;
+                            let idx = (x + idx_y) as isize;
 
                             // Interpolate and test depth. Note that we are interpolating
                             // z/w, which is linear in screen space, no special perspective

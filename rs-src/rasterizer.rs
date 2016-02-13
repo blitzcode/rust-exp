@@ -1455,6 +1455,223 @@ static GAMMA_11BIT_LUT: [u8; 2048] = [
 // ----------
 //
 
+#[inline(always)]
+fn rasterize_and_shade_triangle(// Triangle
+                                vtx0: &TransformedVertex,
+                                vtx1: &TransformedVertex,
+                                vtx2: &TransformedVertex,
+                                // Parameters for shading
+                                shade_per_pixel: bool,
+                                shader: &Shader,
+                                eye: &P3F,
+                                tick: f64,
+                                cm: &IrradianceCMSet,
+                                // Frame and depth buffer
+                                w: i32,
+                                h: i32,
+                                fb: *mut u32,
+                                depth_ptr: *mut f32) {
+    // Break out positions (viewport and world), colors and normals
+    let v0 = vtx0.vp; let p0 = vtx0.world; let c0 = vtx0.col; let n0 = vtx0.n;
+    let v1 = vtx1.vp; let p1 = vtx1.world; let c1 = vtx1.col; let n1 = vtx1.n;
+    let v2 = vtx2.vp; let p2 = vtx2.world; let c2 = vtx2.col; let n2 = vtx2.n;
+
+    // Convert to 28.4 fixed-point. It would be most accurate to round() on these values,
+    // but that is extremely slow. Truncate will do, we're at most a sub-pixel off
+    let x0 = (v0.x * 16.0) as i32;
+    let y0 = (v0.y * 16.0) as i32;
+    let x1 = (v1.x * 16.0) as i32;
+    let y1 = (v1.y * 16.0) as i32;
+    let x2 = (v2.x * 16.0) as i32;
+    let y2 = (v2.y * 16.0) as i32;
+
+    // Edge deltas
+    let dx10 = x1 - x0; let dy01 = y0 - y1;
+    let dx21 = x2 - x1; let dy12 = y1 - y2;
+    let dx02 = x0 - x2; let dy20 = y2 - y0;
+
+    // Backface culling through cross product. The Z component of the resulting vector
+    // tells us if the triangle is facing the camera or not, its magnitude is the 2x the
+    // signed area of the triangle, which is exactly what we need to normalize our
+    // barycentric coordinates later
+    let tri_a2 = (x1 - x0) * (y2 - y0) - (y1 - y0) * (x2 - x0);
+    if tri_a2 <= 0 { return }
+    let inv_tri_a2 = 1.0 / tri_a2 as f32;
+
+    // We test triangle coverage at integer coordinates D3D9 style vs centers like >=D3D10
+    // and OpenGL. Our pixel center is at the bottom-left. We also use a bottom-left fill
+    // convention, unlike the more conventional top-left one. It's what D3D does, but with
+    // the Y axis flipped (our origin is bottom-left). We normally consider only raster
+    // positions as on the inside of an edge if the half-space function returns a positive
+    // value. For the bottom-left edges we want the contested raster positions lying on
+    // the edge to belong to its triangle.
+    //
+    // Consider these two 2x2 triangulated quads and how they'd rasterize with each convention
+    //
+    // *--*--*    top-left    bottom-left
+    // |2   /|
+    // *  *  *      2 2           . .
+    // |/   3|      2 3           2 3
+    // *--*--*      0 0           3 3
+    // |0   /|      0 1           0 1
+    // *  *  *      . .           1 1
+    // |/   1|
+    // *--*--*
+    //
+    // With a bottom-left coordinate system origin and pixel center the latter fill convention
+    // just makes more sense to me. No need to shift our AABB's Y by one and we can just round
+    // up on both min / max bound
+
+    // AABB of the triangle, map to pixels by rounding up
+    let min_x = (min3(x0, x1, x2) + 0xF) >> 4;
+    let min_y = (min3(y0, y1, y2) + 0xF) >> 4;
+    let max_x = (max3(x0, x1, x2) + 0xF) >> 4;
+    let max_y = (max3(y0, y1, y2) + 0xF) >> 4;
+
+    // Clip against framebuffer
+    let min_x = na::clamp(min_x, 0, w);
+    let min_y = na::clamp(min_y, 0, h);
+    let max_x = na::clamp(max_x, 0, w);
+    let max_y = na::clamp(max_y, 0, h);
+
+    // Implement bottom-left fill convention. Classifying those edges is simple, as with
+    // CCW vertex order they are either descending or horizontally moving left to right.
+    // We basically want to turn the '> 0' comparison into '>= 0', and we do this by adding
+    // a constant 1 for the half-space functions of those edges
+    let e0add = if dy01 > 0 || (dy01 == 0 && dx10 > 0) { 1 } else { 0 };
+    let e1add = if dy12 > 0 || (dy12 == 0 && dx21 > 0) { 1 } else { 0 };
+    let e2add = if dy20 > 0 || (dy20 == 0 && dx02 > 0) { 1 } else { 0 };
+
+    // We take the obvious formulation of the cross product edge functions
+    //
+    // hs0 = (x1 - x0) * (yf - y0) - (y1 - y0) * (xf - x0)
+    // hs1 = (x2 - x1) * (yf - y1) - (y2 - y1) * (xf - x1)
+    // hs2 = (x0 - x2) * (yf - y2) - (y0 - y2) * (xf - x2)
+    //
+    // and transform it into something more easily split based on its dependencies
+    //
+    // hs0 = (y0 - y1) * xf + (x1 - x0) * yf + (x0 * y1 - y0 * x1)
+    // hs1 = (y1 - y2) * xf + (x2 - x1) * yf + (x1 * y2 - y1 * x2)
+    // hs2 = (y2 - y0) * xf + (x0 - x2) * yf + (x2 * y0 - y2 * x0)
+    //
+    // Now we can separate the constant part and split the x/y dependent terms into an
+    // initial value and one to add for every step in each loop direction
+
+    // Edge function constant. The '+ 1' is so we can change the inside-edge compare in
+    // the inner loop from > to >=, meaning we can just OR the signs of the edge functions
+    let e0c = x0 * y1 - y0 * x1 + e0add + 1;
+    let e1c = x1 * y2 - y1 * x2 + e1add + 1;
+    let e2c = x2 * y0 - y2 * x0 + e2add + 1;
+
+    // Starting value at AABB origin
+    let mut e0y = dy01 * (min_x << 4) + dx10 * (min_y << 4) + e0c;
+    let mut e1y = dy12 * (min_x << 4) + dx21 * (min_y << 4) + e1c;
+    let mut e2y = dy20 * (min_x << 4) + dx02 * (min_y << 4) + e2c;
+
+    // Fixed-point edge deltas (another shift because each pixel step is
+    // 1 << 4 steps for the edge function)
+    let fp_dx10 = dx10 << 4; let fp_dy01 = dy01 << 4; let fp_dx21 = dx21 << 4;
+    let fp_dy12 = dy12 << 4; let fp_dx02 = dx02 << 4; let fp_dy20 = dy20 << 4;
+
+    for y in min_y..max_y {
+        // Starting point for X stepping
+        let mut e0x = e0y;
+        let mut e1x = e1y;
+        let mut e2x = e2y;
+
+        let idx_y = y * w;
+
+        for x in min_x..max_x {
+            // Check the half-space functions for all three edges to see if we're inside
+            // the triangle. These functions are basically just a cross product between an
+            // edge and a vector from the current raster position to the edge. The resulting
+            // vector will either point into or out of the screen, so we can check which
+            // side of the edge we're on by the sign of the Z component. See notes for
+            // 'e[012]c' as for how we do the compare
+            if e0x | e1x | e2x >= 0 {
+                // The cross product from the edge function not only tells us which side
+                // we're on, but also the area of parallelogram formed by the two vectors.
+                // We're basically getting twice the area of one of the three triangles
+                // splitting the original triangle around the raster position. Those are
+                // already barycentric coordinates, we just need to normalize them with
+                // the triangle area we already computed with the cross product for the
+                // backface culling test. Don't forget to remove the fill convention
+                // (e[012]add) and comparison (+1) bias applied earlier
+                let b0 = (e0x - e0add - 1) as f32 * inv_tri_a2;
+                let b1 = (e1x - e1add - 1) as f32 * inv_tri_a2;
+                let b2 = (e2x - e2add - 1) as f32 * inv_tri_a2;
+
+                let idx = (x + idx_y) as isize;
+
+                // Interpolate and test depth. Note that we are interpolating z/w, which
+                // is linear in screen space, no special perspective correct interpolation
+                // required. We also use a Z buffer, not a W buffer
+                let z = v0.z * b1 + v1.z * b2 + v2.z * b0;
+                let d = unsafe { depth_ptr.offset(idx) };
+                if unsafe { *d > z } {
+                    // Write depth
+                    unsafe { *d = z };
+
+                    // During vertex processing we already replaced w with 1/w
+                    let inv_w_0 = v0.w;
+                    let inv_w_1 = v1.w;
+                    let inv_w_2 = v2.w;
+
+                    // To do perspective correct interpolation of attributes we need
+                    // to know w at the current raster position. We can compute it by
+                    // interpolating 1/w linearly and then taking the reciprocal
+                    let w_raster = 1.0 / (inv_w_0 * b1 + inv_w_1 * b2 + inv_w_2 * b0);
+
+                    // Interpolate color. Perspective correct interpolation requires us to
+                    // linearly interpolate col/w and then multiply by w
+                    let c_raster = (c0 * inv_w_0 * b1 +
+                                    c1 * inv_w_1 * b2 +
+                                    c2 * inv_w_2 * b0) * w_raster;
+
+                    // Shading
+                    let out = if shade_per_pixel {
+                        // Also do perspective correct interpolation of the vertex normal
+                        // and world space position, the shader might want these
+                        let p_raster = (p0 * inv_w_0 * b1 +
+                                        p1 * inv_w_1 * b2 +
+                                        p2 * inv_w_2 * b0) * w_raster;
+                        let n_raster = (n0 * inv_w_0 * b1 +
+                                        n1 * inv_w_1 * b2 +
+                                        n2 * inv_w_2 * b0) * w_raster;
+
+                        // Call shader
+                        shader(&p_raster, &n_raster, &c_raster, &eye, tick, cm)
+                    } else {
+                        // Just write interpolated per-vertex shading result
+                        c_raster
+                    };
+
+                    // Gamma correct and write color
+                    unsafe {
+                        * fb.offset(idx) = rgbf_to_abgr32_gamma(out.x, out.y, out.z);
+                    }
+                }
+            }
+
+            // Step X
+            e0x += fp_dy01;
+            e1x += fp_dy12;
+            e2x += fp_dy20;
+        }
+
+        // Step Y
+        e0y += fp_dx10;
+        e1y += fp_dx21;
+        e2y += fp_dx02;
+    }
+}
+
+//
+// ------------
+// Entry Points
+// ------------
+//
+
 #[no_mangle]
 pub extern fn rast_benchmark() {
     // Allocate framebuffer
@@ -1480,7 +1697,7 @@ pub extern fn rast_benchmark() {
         ("CornellBoxP", 26782, &|| rast_draw(1, RenderMode::Fill, 11, 5, 0, 0, 0., w, h, fb_ptr))
     ];
 
-    // Run once to all the one-time initialization etc. is done
+    // Run once so all the one-time initialization etc. is done
     for i in 0..benchmarks.len() { benchmarks[i].2(); }
 
     // Vector storing the best time
@@ -1574,7 +1791,7 @@ pub extern fn rast_draw(shade_per_pixel: i32,
                         tick: f64,
                         w: i32,
                         h: i32,
-                        fb: *mut u32) -> () {
+                        fb: *mut u32) {
     // Transform, rasterize and shade mesh
 
     // Avoid passing a bool over the FFI, convert now
@@ -1643,210 +1860,10 @@ pub extern fn rast_draw(shade_per_pixel: i32,
                 let vtx1 = unsafe { vtx_transf.get_unchecked(t.v1 as usize) };
                 let vtx2 = unsafe { vtx_transf.get_unchecked(t.v2 as usize) };
 
-                // Break out positions (viewport and world), colors and normals
-                let v0 = vtx0.vp; let p0 = vtx0.world; let c0 = vtx0.col; let n0 = vtx0.n;
-                let v1 = vtx1.vp; let p1 = vtx1.world; let c1 = vtx1.col; let n1 = vtx1.n;
-                let v2 = vtx2.vp; let p2 = vtx2.world; let c2 = vtx2.col; let n2 = vtx2.n;
-
-                // Convert to 28.4 fixed-point. It would be most accurate to round() on
-                // these values, but that is extremely slow. Truncate will do, we're at
-                // most a sub-pixel off
-                let x0 = (v0.x * 16.0) as i32;
-                let y0 = (v0.y * 16.0) as i32;
-                let x1 = (v1.x * 16.0) as i32;
-                let y1 = (v1.y * 16.0) as i32;
-                let x2 = (v2.x * 16.0) as i32;
-                let y2 = (v2.y * 16.0) as i32;
-
-                // Edge deltas
-                let dx10 = x1 - x0; let dy01 = y0 - y1;
-                let dx21 = x2 - x1; let dy12 = y1 - y2;
-                let dx02 = x0 - x2; let dy20 = y2 - y0;
-
-                // Backface culling through cross product. The Z component of the
-                // resulting vector tells us if the triangle is facing the camera or not,
-                // its magnitude is the 2x the signed area of the triangle, which is
-                // exactly what we need to normalize our barycentric coordinates later
-                let tri_a2 = (x1 - x0) * (y2 - y0) - (y1 - y0) * (x2 - x0);
-                if tri_a2 <= 0 { continue }
-                let inv_tri_a2 = 1.0 / tri_a2 as f32;
-
-                // We test triangle coverage at integer coordinates D3D9 style vs centers
-                // like >=D3D10 and OpenGL. Our pixel center is at the bottom-left. We
-                // also use a bottom-left fill convention, unlike the more conventional
-                // top-left one. It's what D3D does, but with the Y axis flipped (our
-                // origin is bottom-left). We normally consider only raster positions as
-                // on the inside of an edge if the half-space function returns a positive
-                // value. For the bottom-left edges we want the contested raster positions
-                // lying on the edge to belong to its triangle.
-                //
-                // Consider these two 2x2 triangulated quads and how they'd rasterize with
-                // each convention
-                //
-                // *--*--*    top-left    bottom-left
-                // |2   /|
-                // *  *  *      2 2           . .
-                // |/   3|      2 3           2 3
-                // *--*--*      0 0           3 3
-                // |0   /|      0 1           0 1
-                // *  *  *      . .           1 1
-                // |/   1|
-                // *--*--*
-                //
-                // With a bottom-left coordinate system origin and pixel center the latter
-                // fill convention just makes more sense to me. No need to shift our AABB's
-                // Y by one and we can just round up on both min / max bound
-
-                // AABB of the triangle, map to pixels by rounding up
-                let min_x = (min3(x0, x1, x2) + 0xF) >> 4;
-                let min_y = (min3(y0, y1, y2) + 0xF) >> 4;
-                let max_x = (max3(x0, x1, x2) + 0xF) >> 4;
-                let max_y = (max3(y0, y1, y2) + 0xF) >> 4;
-
-                // Clip against framebuffer
-                let min_x = na::clamp(min_x, 0, w);
-                let min_y = na::clamp(min_y, 0, h);
-                let max_x = na::clamp(max_x, 0, w);
-                let max_y = na::clamp(max_y, 0, h);
-
-                // Implement bottom-left fill convention. Classifying those edges is
-                // simple, as with CCW vertex order they are either descending or
-                // horizontally moving left to right. We basically want to turn the '> 0'
-                // comparison into '>= 0', and we do this by adding a constant 1 for the
-                // half-space functions of those edges
-                let e0add = if dy01 > 0 || (dy01 == 0 && dx10 > 0) { 1 } else { 0 };
-                let e1add = if dy12 > 0 || (dy12 == 0 && dx21 > 0) { 1 } else { 0 };
-                let e2add = if dy20 > 0 || (dy20 == 0 && dx02 > 0) { 1 } else { 0 };
-
-                // We take the obvious formulation of the cross product edge functions
-                //
-                // hs0 = (x1 - x0) * (yf - y0) - (y1 - y0) * (xf - x0)
-                // hs1 = (x2 - x1) * (yf - y1) - (y2 - y1) * (xf - x1)
-                // hs2 = (x0 - x2) * (yf - y2) - (y0 - y2) * (xf - x2)
-                //
-                // and transform it into something more easily split based on its dependencies
-                //
-                // hs0 = (y0 - y1) * xf + (x1 - x0) * yf + (x0 * y1 - y0 * x1)
-                // hs1 = (y1 - y2) * xf + (x2 - x1) * yf + (x1 * y2 - y1 * x2)
-                // hs2 = (y2 - y0) * xf + (x0 - x2) * yf + (x2 * y0 - y2 * x0)
-                //
-                // Now we can separate the constant part and split the x/y dependent terms
-                // into an initial value and one to add for every step in each loop direction
-
-                // Edge function constant. The '+ 1' is so we can change the inside-edge
-                // compare in the inner loop from > to >=, meaning we can just OR the
-                // signs of the edge functions
-                let e0c = x0 * y1 - y0 * x1 + e0add + 1;
-                let e1c = x1 * y2 - y1 * x2 + e1add + 1;
-                let e2c = x2 * y0 - y2 * x0 + e2add + 1;
-
-                // Starting value at AABB origin
-                let mut e0y = dy01 * (min_x << 4) + dx10 * (min_y << 4) + e0c;
-                let mut e1y = dy12 * (min_x << 4) + dx21 * (min_y << 4) + e1c;
-                let mut e2y = dy20 * (min_x << 4) + dx02 * (min_y << 4) + e2c;
-
-                // Fixed-point edge deltas (another shift because each pixel step is 1 << 4
-                // steps for the edge function)
-                let fp_dx10 = dx10 << 4; let fp_dy01 = dy01 << 4; let fp_dx21 = dx21 << 4;
-                let fp_dy12 = dy12 << 4; let fp_dx02 = dx02 << 4; let fp_dy20 = dy20 << 4;
-
-                for y in min_y..max_y {
-                    // Starting point for X stepping
-                    let mut e0x = e0y;
-                    let mut e1x = e1y;
-                    let mut e2x = e2y;
-
-                    let idx_y = y * w;
-
-                    for x in min_x..max_x {
-                        // Check the half-space functions for all three edges to see if
-                        // we're inside the triangle. These functions are basically just a
-                        // cross product between an edge and a vector from the current
-                        // raster position to the edge. The resulting vector will either
-                        // point into or out of the screen, so we can check which side of
-                        // the edge we're on by the sign of the Z component. See notes for
-                        // 'e[012]c' as for how we do the compare
-                        if e0x | e1x | e2x >= 0 {
-                            // The cross product from the edge function not only tells us
-                            // which side we're on, but also the area of parallelogram
-                            // formed by the two vectors. We're basically getting twice
-                            // the area of one of the three triangles splitting the
-                            // original triangle around the raster position. Those are
-                            // already barycentric coordinates, we just need to normalize
-                            // them with the triangle area we already computed with the
-                            // cross product for the backface culling test. Don't forget
-                            // to remove the fill convention (e[012]add) and comparison
-                            // (+1) bias applied earlier
-                            let b0 = (e0x - e0add - 1) as f32 * inv_tri_a2;
-                            let b1 = (e1x - e1add - 1) as f32 * inv_tri_a2;
-                            let b2 = (e2x - e2add - 1) as f32 * inv_tri_a2;
-
-                            let idx = (x + idx_y) as isize;
-
-                            // Interpolate and test depth. Note that we are interpolating
-                            // z/w, which is linear in screen space, no special perspective
-                            // correct interpolation required. We also use a Z buffer, not
-                            // a W buffer
-                            let z = v0.z * b1 + v1.z * b2 + v2.z * b0;
-                            let d = unsafe { depth_ptr.offset(idx) };
-                            if unsafe { *d > z } {
-                                // Write depth
-                                unsafe { *d = z };
-
-                                // During vertex processing we already replaced w with 1/w
-                                let inv_w_0 = v0.w;
-                                let inv_w_1 = v1.w;
-                                let inv_w_2 = v2.w;
-
-                                // To do perspective correct interpolation of attributes we
-                                // need to know w at the current raster position. We can
-                                // compute it by interpolating 1/w linearly and then taking
-                                // the reciprocal
-                                let w_raster = 1.0 / (inv_w_0 * b1 + inv_w_1 * b2 + inv_w_2 * b0);
-
-                                // Interpolate color. Perspective correct interpolation requires
-                                // us to linearly interpolate col/w and then multiply by w
-                                let c_raster = (c0 * inv_w_0 * b1 +
-                                                c1 * inv_w_1 * b2 +
-                                                c2 * inv_w_2 * b0) * w_raster;
-
-                                // Shading
-                                let out = if shade_per_pixel {
-                                    // Also do perspective correct interpolation of the
-                                    // vertex normal and world space position, the shader
-                                    // might want these
-                                    let p_raster = (p0 * inv_w_0 * b1 +
-                                                    p1 * inv_w_1 * b2 +
-                                                    p2 * inv_w_2 * b0) * w_raster;
-                                    let n_raster = (n0 * inv_w_0 * b1 +
-                                                    n1 * inv_w_1 * b2 +
-                                                    n2 * inv_w_2 * b0) * w_raster;
-
-                                    // Call shader
-                                    shader(&p_raster, &n_raster, &c_raster, &eye, tick, cm)
-                                } else {
-                                    // Just write interpolated per-vertex shading result
-                                    c_raster
-                                };
-
-                                // Gamma correct and write color
-                                unsafe {
-                                    * fb.offset(idx) = rgbf_to_abgr32_gamma(out.x, out.y, out.z);
-                                }
-                            }
-                        }
-
-                        // Step X
-                        e0x += fp_dy01;
-                        e1x += fp_dy12;
-                        e2x += fp_dy20;
-                    }
-
-                    // Step Y
-                    e0y += fp_dx10;
-                    e1y += fp_dx21;
-                    e2y += fp_dx02;
-                }
+                rasterize_and_shade_triangle(
+                    vtx0, vtx1, vtx2,
+                    shade_per_pixel, &shader, &eye, tick, cm,
+                    w, h, fb, depth_ptr);
             }
         }
     }

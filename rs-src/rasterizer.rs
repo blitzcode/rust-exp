@@ -12,6 +12,7 @@ use std::f32::consts;
 use stb_image::image;
 use time::{PreciseTime};
 use std::cmp;
+use ansi_term;
 
 //
 // ------------------------------------------
@@ -1486,20 +1487,60 @@ pub extern fn rast_benchmark() {
         }
     }
 
-    // Result table
-    println!("\nBenchmarks (best time out of {} runs)\n", num_runs);
-    println!("Name            | Ref    | Now    | %-Diff ");
-    println!("-------------------------------------------------");
+    // Overall time
+    let mut total_ref = 0;
+    let mut total_now = 0;
     for i in 0..benchmarks.len() {
-        let time_ref     = benchmarks[i].1;
-        let time_now     = timings[i];
-        let time_diff    = time_now - time_ref;
-        let percent_diff = (time_diff as f64 / time_ref as f64) * 100.0;
-        println!("{:<16} {:>5}μs  {:>5}μs  {:>+6.2}%",
-                 benchmarks[i].0,
-                 time_ref,
-                 time_now,
-                 percent_diff);
+        total_ref += benchmarks[i].1;
+        total_now += timings[i];
+    }
+
+    // Benchmark table
+    let hr = "-------------------------------------------------";
+    println!("\n      Name      |    Ref   |    Now   |  %-Diff");
+    println!("{}", hr);
+    for i in 0..benchmarks.len() + 1 {
+        let name;
+        let time_ref;
+        let time_now;
+        let time_diff;
+        let percent_diff;
+
+        // Print summary as last entry
+        if i == benchmarks.len() {
+            name         = "<Total>";
+            time_ref     = total_ref;
+            time_now     = total_now;
+            time_diff    = total_now - total_ref;
+            percent_diff = (time_diff as f64 / total_ref as f64) * 100.0;
+            println!("{}", hr);
+        } else {
+            name         = benchmarks[i].0;
+            time_ref     = benchmarks[i].1;
+            time_now     = timings[i];
+            time_diff    = time_now - time_ref;
+            percent_diff = (time_diff as f64 / time_ref as f64) * 100.0;
+        }
+
+        let neutral     = ansi_term::Colour::White.dimmed();
+        let regression  = ansi_term::Colour::Red  .normal();
+        let improvement = ansi_term::Colour::Green.normal();
+        let tolerance   = 1.0;
+        let style       = if percent_diff <= -tolerance {
+                              improvement
+                          } else if percent_diff >= tolerance {
+                              regression
+                          } else {
+                              neutral
+                          };
+        let display_str = format!("{:^16}|{:^7}μs |{:^7}μs | {:^+7.2}%",
+                                  name,
+                                  time_ref,
+                                  time_now,
+                                  percent_diff);
+
+        println!("{}", style.paint(display_str));
+
     }
     println!("");
 }

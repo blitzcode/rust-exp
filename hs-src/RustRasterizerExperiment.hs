@@ -61,6 +61,7 @@ makeLenses ''RustRasterizerExperiment
 
 instance Experiment RustRasterizerExperiment where
     withExperiment f = do
+        rastBenchmark
         num_mesh   <- fromIntegral <$> rastGetNumMeshes
         num_shader <- fromIntegral <$> rastGetNumShaders
         num_cm     <- fromIntegral <$> rastGetNumCMSets
@@ -172,4 +173,6 @@ foreign import ccall "rast_get_cm_set_name" rastGetCMSetName :: CInt       -- CM
                                                              -> IO CString -- CM set name
 
 foreign import ccall "rast_get_num_backgrounds" rastGetNumBackgrounds :: IO CInt -- Number of BGs
+
+foreign import ccall "rast_benchmark" rastBenchmark :: IO ()
 

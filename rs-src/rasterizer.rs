@@ -1455,12 +1455,12 @@ pub extern fn rast_benchmark() {
 
     // Benchmark name, reference and function
     let benchmarks:[(&str, i64, &Fn() -> ()); 6] = [
-        ("Killeroo"  , 4861, &|| rast_draw(0, RenderMode::Fill, 0, 0 , 0, 0, 0.0, w, h, fb_ptr)),
-        ("Head"      , 5139, &|| rast_draw(0, RenderMode::Fill, 0, 1 , 0, 0, 0.0, w, h, fb_ptr)),
-        ("Hand"      , 5753, &|| rast_draw(0, RenderMode::Fill, 0, 4 , 0, 0, 0.0, w, h, fb_ptr)),
-        ("TorusKnot" , 7307, &|| rast_draw(0, RenderMode::Fill, 0, 6 , 0, 0, 0.0, w, h, fb_ptr)),
-        ("Cube"      , 6573, &|| rast_draw(0, RenderMode::Fill, 0, 9 , 0, 0, 0.0, w, h, fb_ptr)),
-        ("CornellBox", 6563, &|| rast_draw(0, RenderMode::Fill, 0, 11, 0, 0, 0.0, w, h, fb_ptr))
+        ("Killeroo"  , 4193, &|| rast_draw(1, RenderMode::Fill, 0 , 0, 0, 0, 0.0, w, h, fb_ptr)),
+        ("Head"      , 6600, &|| rast_draw(1, RenderMode::Fill, 1 , 0, 0, 0, 0.0, w, h, fb_ptr)),
+        ("Hand"      , 1828, &|| rast_draw(1, RenderMode::Fill, 4 , 0, 0, 0, 0.0, w, h, fb_ptr)),
+        ("TorusKnot" , 3450, &|| rast_draw(1, RenderMode::Fill, 6 , 0, 0, 0, 0.0, w, h, fb_ptr)),
+        ("Cube"      , 1788, &|| rast_draw(1, RenderMode::Fill, 9 , 0, 0, 0, 0.0, w, h, fb_ptr)),
+        ("CornellBox", 3007, &|| rast_draw(1, RenderMode::Fill, 11, 0, 0, 0, 0.0, w, h, fb_ptr))
     ];
 
     // Run once to all the one-time initialization etc. is done

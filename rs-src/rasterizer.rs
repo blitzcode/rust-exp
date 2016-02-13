@@ -1219,9 +1219,10 @@ fn draw_bg_gradient(bg_idx: i32, w: i32, h: i32, fb: *mut u32) {
         // this way. It's also faster
         let col32 = rgbf_to_abgr32(col.x, col.y, col.z);
 
+        let fb_row = unsafe { fb.offset((y * w) as isize) };
         for x in 0..w {
             unsafe {
-                * fb.offset((x + y * w) as isize) = col32;
+                * fb_row.offset(x as isize) = col32;
             }
         }
     }

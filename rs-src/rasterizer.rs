@@ -874,7 +874,7 @@ fn shader_cm_diff_rim(p: &V3F, n: &V3F, col: &V3F, eye: &P3F, _: f64,
 
     let fresnel = fresnel_conductor(na::dot(&-eye, &n), 1.0, 1.1);
 
-    (lookup_cm(&cm.cos_1, &n) + fresnel) * *col
+    (lookup_cm(&cm.cos_1, &n) + fresnel * 0.75) * *col
 }
 
 fn shader_cm_glossy(p: &V3F, n: &V3F, col: &V3F, eye: &P3F, _tick: f64,
@@ -965,6 +965,21 @@ fn shader_cm_blue(p: &V3F, n: &V3F, col: &V3F, eye: &P3F, _tick: f64,
     ( lookup_cm(&cm.cos_1 ,  &n) * Vec3::new(0.2, 0.2, 0.8)    * ldotn
     + lookup_cm(&cm.cos_64,  &r) * normalize_phong_lobe(64.0 ) * 0.75
     + lookup_cm(&cm.cos_512, &r) * normalize_phong_lobe(512.0) * (1.0 - ldotn)
+    )
+    * (*col * *col)
+}
+
+fn shader_cm_blinn_schlick(p: &V3F, n: &V3F, col: &V3F, eye: &P3F, _tick: f64,
+                           cm: &IrradianceCMSet) -> V3F {
+    let n   = fast_normalize(n);
+    let eye = *p - *eye.as_vec();
+    let r   = reflect(&eye, &n);
+    let h   = (n + r) / (n + r).norm();
+    let w   = 1.0 - na::clamp(na::dot(&h, &eye), 0.0, 1.0);
+    let w   = w * w;
+
+    (  lookup_cm(&cm.cos_1 , &n) * V3F::new(0.8, 0.65, 1.0) * w
+    + (lookup_cm(&cm.cos_64, &h) * normalize_phong_lobe(64.0) * (1.25 - w))
     )
     * (*col * *col)
 }
@@ -1066,7 +1081,7 @@ fn fast_unit_pow16(v: f32) -> f32 {
 }
 
 #[no_mangle]
-pub extern fn rast_get_num_shaders() -> i32 { 15 }
+pub extern fn rast_get_num_shaders() -> i32 { 16 }
 
 #[no_mangle]
 pub extern fn rast_get_shader_name(idx: i32) -> *const u8 { shader_by_idx(idx).0.as_ptr() }
@@ -1074,7 +1089,7 @@ pub extern fn rast_get_shader_name(idx: i32) -> *const u8 { shader_by_idx(idx).0
 fn shader_by_idx<'a>(idx: i32) -> (&'a str, bool, Shader) {
     // Retrieve shader name, cube map usage and function by its index
 
-    let shaders: [(&str, bool, Shader); 15] = [
+    let shaders: [(&str, bool, Shader); 16] = [
         // Null terminated names so we can easily pass them as C strings
         ("BakedColor\0"       , false, shader_color             ),
         ("Normals\0"          , false, shader_n_to_color        ),
@@ -1090,7 +1105,8 @@ fn shader_by_idx<'a>(idx: i32) -> (&'a str, bool, Shader) {
         ("CMMetallic\0"       , true , shader_cm_metallic       ),
         ("CMSuperShiny\0"     , true , shader_cm_super_shiny    ),
         ("CMGold\0"           , true , shader_cm_gold           ),
-        ("CMBlue\0"           , true , shader_cm_blue           )
+        ("CMBlue\0"           , true , shader_cm_blue           ),
+        ("CMBlinnSchlick\0"   , true , shader_cm_blinn_schlick  )
     ];
 
     assert!(rast_get_num_shaders() as usize == shaders.len());
@@ -1110,6 +1126,7 @@ fn shader_by_idx<'a>(idx: i32) -> (&'a str, bool, Shader) {
 #[derive(Clone, Copy)]
 struct TransformedVertex {
     vp:    Pnt4<f32>, // Projected, perspective divided, viewport transformed vertex with W
+                      // (note that we actually store 1/W in the last component)
     world: V3F,       // World space vertex and normal for lighting computations etc.
     n:     V3F,       // ...
     col:   V3F        // Color

@@ -1155,6 +1155,10 @@ fn transform_vertices(mesh: &Mesh, w: i32, h: i32, eye: &P3F) -> Vec<Transformed
         dst.vp.y *= inv_w;
         dst.vp.z *= inv_w;
 
+        // We need 1/w for the perspective correct attribute interpolation,
+        // just store the reciprocal we already computed
+        dst.vp.w = inv_w;
+
         // Multiply with the 3x3 IT for world space normals
         dst.n = mesh_to_world_it_33 * src.n;
 
@@ -1461,13 +1465,19 @@ pub extern fn rast_benchmark() {
     let fb_ptr = fb.as_mut_ptr();
 
     // Benchmark name, reference and function
-    let benchmarks:[(&str, i64, &Fn() -> ()); 6] = [
-        ("Killeroo"  , 12329, &|| rast_draw(1, RenderMode::Fill, 0 , 5, 0, 0, 0.0, w, h, fb_ptr)),
-        ("Head"      , 22510, &|| rast_draw(1, RenderMode::Fill, 1 , 5, 0, 0, 0.0, w, h, fb_ptr)),
-        ("Hand"      , 10105, &|| rast_draw(1, RenderMode::Fill, 4 , 5, 0, 0, 0.0, w, h, fb_ptr)),
-        ("TorusKnot" , 24509, &|| rast_draw(1, RenderMode::Fill, 6 , 5, 0, 0, 0.0, w, h, fb_ptr)),
-        ("Cube"      , 27681, &|| rast_draw(1, RenderMode::Fill, 9 , 5, 0, 0, 0.0, w, h, fb_ptr)),
-        ("CornellBox", 30641, &|| rast_draw(1, RenderMode::Fill, 11, 5, 0, 0, 0.0, w, h, fb_ptr))
+    let benchmarks:[(&str, i64, &Fn() -> ()); 12] = [
+        ("KillerooV"  , 7838 , &|| rast_draw(0, RenderMode::Fill, 0 , 5, 0, 0, 0., w, h, fb_ptr)),
+        ("HeadV"      , 11865, &|| rast_draw(0, RenderMode::Fill, 1 , 5, 0, 0, 0., w, h, fb_ptr)),
+        ("HandV"      , 4132 , &|| rast_draw(0, RenderMode::Fill, 4 , 5, 0, 0, 0., w, h, fb_ptr)),
+        ("TorusKnotV" , 7483 , &|| rast_draw(0, RenderMode::Fill, 6 , 5, 0, 0, 0., w, h, fb_ptr)),
+        ("CubeV"      , 7172 , &|| rast_draw(0, RenderMode::Fill, 9 , 5, 0, 0, 0., w, h, fb_ptr)),
+        ("CornellBoxV", 8338 , &|| rast_draw(0, RenderMode::Fill, 11, 5, 0, 0, 0., w, h, fb_ptr)),
+        ("KillerooP"  , 11373, &|| rast_draw(1, RenderMode::Fill, 0 , 5, 0, 0, 0., w, h, fb_ptr)),
+        ("HeadP"      , 20480, &|| rast_draw(1, RenderMode::Fill, 1 , 5, 0, 0, 0., w, h, fb_ptr)),
+        ("HandP"      , 9026 , &|| rast_draw(1, RenderMode::Fill, 4 , 5, 0, 0, 0., w, h, fb_ptr)),
+        ("TorusKnotP" , 21600, &|| rast_draw(1, RenderMode::Fill, 6 , 5, 0, 0, 0., w, h, fb_ptr)),
+        ("CubeP"      , 24076, &|| rast_draw(1, RenderMode::Fill, 9 , 5, 0, 0, 0., w, h, fb_ptr)),
+        ("CornellBoxP", 26782, &|| rast_draw(1, RenderMode::Fill, 11, 5, 0, 0, 0., w, h, fb_ptr))
     ];
 
     // Run once to all the one-time initialization etc. is done
@@ -1783,9 +1793,10 @@ pub extern fn rast_draw(shade_per_pixel: i32,
                                 // Write depth
                                 unsafe { *d = z };
 
-                                let inv_w_0 = 1.0 / vtx0.vp.w;
-                                let inv_w_1 = 1.0 / vtx1.vp.w;
-                                let inv_w_2 = 1.0 / vtx2.vp.w;
+                                // During vertex processing we already replaced w with 1/w
+                                let inv_w_0 = v0.w;
+                                let inv_w_1 = v1.w;
+                                let inv_w_2 = v2.w;
 
                                 // To do perspective correct interpolation of attributes we
                                 // need to know w at the current raster position. We can

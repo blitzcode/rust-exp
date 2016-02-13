@@ -1455,12 +1455,12 @@ pub extern fn rast_benchmark() {
 
     // Benchmark name, reference and function
     let benchmarks:[(&str, i64, &Fn() -> ()); 6] = [
-        ("Killeroo"  , 3382, &|| rast_draw(1, RenderMode::Fill, 0 , 0, 0, 0, 0.0, w, h, fb_ptr)),
-        ("Head"      , 5287, &|| rast_draw(1, RenderMode::Fill, 1 , 0, 0, 0, 0.0, w, h, fb_ptr)),
-        ("Hand"      , 1319, &|| rast_draw(1, RenderMode::Fill, 4 , 0, 0, 0, 0.0, w, h, fb_ptr)),
-        ("TorusKnot" , 2209, &|| rast_draw(1, RenderMode::Fill, 6 , 0, 0, 0, 0.0, w, h, fb_ptr)),
-        ("Cube"      , 1163, &|| rast_draw(1, RenderMode::Fill, 9 , 0, 0, 0, 0.0, w, h, fb_ptr)),
-        ("CornellBox", 1857, &|| rast_draw(1, RenderMode::Fill, 11, 0, 0, 0, 0.0, w, h, fb_ptr))
+        ("Killeroo"  , 2714, &|| rast_draw(1, RenderMode::Fill, 0 , 0, 0, 0, 0.0, w, h, fb_ptr)),
+        ("Head"      , 4198, &|| rast_draw(1, RenderMode::Fill, 1 , 0, 0, 0, 0.0, w, h, fb_ptr)),
+        ("Hand"      , 1170, &|| rast_draw(1, RenderMode::Fill, 4 , 0, 0, 0, 0.0, w, h, fb_ptr)),
+        ("TorusKnot" , 2140, &|| rast_draw(1, RenderMode::Fill, 6 , 0, 0, 0, 0.0, w, h, fb_ptr)),
+        ("Cube"      , 1151, &|| rast_draw(1, RenderMode::Fill, 9 , 0, 0, 0, 0.0, w, h, fb_ptr)),
+        ("CornellBox", 1811, &|| rast_draw(1, RenderMode::Fill, 11, 0, 0, 0, 0.0, w, h, fb_ptr))
     ];
 
     // Run once to all the one-time initialization etc. is done
@@ -1592,13 +1592,15 @@ pub extern fn rast_draw(shade_per_pixel: i32,
                 let v1 = &vtx1.vp; let p1 = &vtx1.world; let c1 = &vtx1.col; let n1 = &vtx1.n;
                 let v2 = &vtx2.vp; let p2 = &vtx2.world; let c2 = &vtx2.col; let n2 = &vtx2.n;
 
-                // Convert to 28.4 fixed-point
-                let x0 = (v0.x * 16.0).round() as i32;
-                let y0 = (v0.y * 16.0).round() as i32;
-                let x1 = (v1.x * 16.0).round() as i32;
-                let y1 = (v1.y * 16.0).round() as i32;
-                let x2 = (v2.x * 16.0).round() as i32;
-                let y2 = (v2.y * 16.0).round() as i32;
+                // Convert to 28.4 fixed-point. It would be most accurate to round() on
+                // these values, but that is extremely slow. Truncate will do, we're at
+                // most a sub-pixel off
+                let x0 = (v0.x * 16.0) as i32;
+                let y0 = (v0.y * 16.0) as i32;
+                let x1 = (v1.x * 16.0) as i32;
+                let y1 = (v1.y * 16.0) as i32;
+                let x2 = (v2.x * 16.0) as i32;
+                let y2 = (v2.y * 16.0) as i32;
 
                 // Edge deltas
                 let dx10 = x1 - x0; let dy01 = y0 - y1;

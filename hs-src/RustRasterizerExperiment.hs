@@ -12,8 +12,10 @@ import Control.Lens hiding (Index)
 import Control.Monad.State.Class
 import Foreign.C.Types
 import Foreign.C.String
+import Foreign.Marshal.Utils
 import Foreign.Ptr
 import Data.Word
+import Data.List
 import Data.Maybe
 import Text.Printf
 import qualified Data.Vector.Storable.Mutable as VSM
@@ -77,6 +79,29 @@ instance Experiment RustRasterizerExperiment where
     experimentName _ = "RustRasterizer"
     experimentDraw fb tick = do
         RustRasterizerExperiment { .. } <- get
+
+        {-
+        (w, h) <- liftIO $ getFrameBufferDim fb
+        fb_vec <- liftIO (VSM.new $ w * h :: IO (VSM.IOVector Word32))
+        time <- liftIO . VSM.unsafeWith fb_vec $ \pfb_vec -> do
+            time <- fst <$> timeIt (rastDraw (fromIntegral $ fromEnum _rrShadePerPixel)
+                                     (fromIntegral $ fromEnum _rrMode         )
+                                     (fromIntegral $ idxVal _rrMeshIdx        )
+                                     (fromIntegral $ idxVal _rrShaderIdx      )
+                                     (fromIntegral $ idxVal _rrCMIdx          )
+                                     (fromIntegral $ idxVal _rrBgIdx          )
+                                     (realToFrac tick)
+                                     (fromIntegral w)
+                                     (fromIntegral h)
+                                     pfb_vec)
+            fillFrameBuffer fb $ \w h vec ->
+                VSM.unsafeWith vec $ \pvec ->
+                    copyBytes pvec pfb_vec (w * h * 4)
+            return time
+        rrTimes %= BS.push_ time
+        return ()
+        -}
+
         mbtime <- liftIO . fillFrameBuffer fb $ \w h vec ->
             VSM.unsafeWith vec $ \pvec ->
                 fst <$> timeIt (rastDraw (fromIntegral $ fromEnum _rrShadePerPixel)
@@ -89,12 +114,17 @@ instance Experiment RustRasterizerExperiment where
                                          (fromIntegral w)
                                          (fromIntegral h)
                                          pvec)
+                --return 1
         case mbtime of
             Just time -> rrTimes %= BS.push_ time
             Nothing   -> return ()
+        
     experimentStatusString = do
         RustRasterizerExperiment { .. } <- get
-        let avgtime    = fromMaybe 1 . median . BS.toList $ _rrTimes
+        let avgtime    = case BS.toList _rrTimes of
+                              [] -> 0
+                              xs -> head (sort xs)-- fromMaybe 1 . median . BS.toList $ _rrTimes
+
             mesh_idx   = fromIntegral $ idxVal _rrMeshIdx
             shader_idx = fromIntegral $ idxVal _rrShaderIdx
             cm_idx     = fromIntegral $ idxVal _rrCMIdx

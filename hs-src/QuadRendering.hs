@@ -82,6 +82,7 @@ bindAllocateDynamicBO bo target size = do
                                )
 
 allocVBO :: QuadRenderer -> IO ()
+--allocVBO _ = return ()
 allocVBO QuadRenderer { .. } = do
     let szf           = sizeOf (0 :: Float)
         numfloat      = qrTotalStride * qrMaxVtx
@@ -91,6 +92,7 @@ allocVBO QuadRenderer { .. } = do
                                        )
 
 allocEBO :: QuadRenderer -> IO ()
+--allocEBO _ = return ()
 allocEBO QuadRenderer { .. } = do
    let numIdx = qrMaxTri * 3
        szi    = sizeOf(0 :: GL.GLuint)
@@ -98,6 +100,7 @@ allocEBO QuadRenderer { .. } = do
                                              , nullPtr       -- Just allocate
                                              , GL.StreamDraw -- Dynamic
                                              )
+
 setAttribArray :: GL.GLuint
                -> Int
                -> Int

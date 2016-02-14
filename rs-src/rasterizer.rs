@@ -13,6 +13,7 @@ use stb_image::image;
 use time::{PreciseTime};
 use std::cmp;
 use ansi_term;
+use std::ptr;
 
 //
 // ------------------------------------------
@@ -1706,18 +1707,18 @@ pub extern fn rast_benchmark() {
 
     // Benchmark name, reference and function
     let benchmarks:[(&str, i64, &Fn() -> ()); 12] = [
-        ("KillerooV"  , 7045 , &|| rast_draw(0, RenderMode::Fill, 0 , 5, 0, 0, 0., w, h, fb_ptr)),
-        ("HeadV"      , 10425, &|| rast_draw(0, RenderMode::Fill, 1 , 5, 0, 0, 0., w, h, fb_ptr)),
-        ("HandV"      , 3606 , &|| rast_draw(0, RenderMode::Fill, 4 , 5, 0, 0, 0., w, h, fb_ptr)),
-        ("TorusKnotV" , 6354 , &|| rast_draw(0, RenderMode::Fill, 6 , 5, 0, 0, 0., w, h, fb_ptr)),
-        ("CubeV"      , 5774 , &|| rast_draw(0, RenderMode::Fill, 9 , 5, 0, 0, 0., w, h, fb_ptr)),
-        ("CornellBoxV", 6795 , &|| rast_draw(0, RenderMode::Fill, 11, 5, 0, 0, 0., w, h, fb_ptr)),
-        ("KillerooP"  , 11360, &|| rast_draw(1, RenderMode::Fill, 0 , 5, 0, 0, 0., w, h, fb_ptr)),
-        ("HeadP"      , 20476, &|| rast_draw(1, RenderMode::Fill, 1 , 5, 0, 0, 0., w, h, fb_ptr)),
-        ("HandP"      , 9017 , &|| rast_draw(1, RenderMode::Fill, 4 , 5, 0, 0, 0., w, h, fb_ptr)),
-        ("TorusKnotP" , 21574, &|| rast_draw(1, RenderMode::Fill, 6 , 5, 0, 0, 0., w, h, fb_ptr)),
-        ("CubeP"      , 24166, &|| rast_draw(1, RenderMode::Fill, 9 , 5, 0, 0, 0., w, h, fb_ptr)),
-        ("CornellBoxP", 26656, &|| rast_draw(1, RenderMode::Fill, 11, 5, 0, 0, 0., w, h, fb_ptr))
+        ("KillerooV"  , 4785 , &|| rast_draw(0, RenderMode::Fill, 0 , 5, 0, 0, 0., w, h, fb_ptr)),
+        ("HeadV"      , 7065 , &|| rast_draw(0, RenderMode::Fill, 1 , 5, 0, 0, 0., w, h, fb_ptr)),
+        ("HandV"      , 2270 , &|| rast_draw(0, RenderMode::Fill, 4 , 5, 0, 0, 0., w, h, fb_ptr)),
+        ("TorusKnotV" , 4395 , &|| rast_draw(0, RenderMode::Fill, 6 , 5, 0, 0, 0., w, h, fb_ptr)),
+        ("CubeV"      , 4254 , &|| rast_draw(0, RenderMode::Fill, 9 , 5, 0, 0, 0., w, h, fb_ptr)),
+        ("CornellBoxV", 4860 , &|| rast_draw(0, RenderMode::Fill, 11, 5, 0, 0, 0., w, h, fb_ptr)),
+        ("KillerooP"  , 8159 , &|| rast_draw(1, RenderMode::Fill, 0 , 5, 0, 0, 0., w, h, fb_ptr)),
+        ("HeadP"      , 14732, &|| rast_draw(1, RenderMode::Fill, 1 , 5, 0, 0, 0., w, h, fb_ptr)),
+        ("HandP"      , 6406 , &|| rast_draw(1, RenderMode::Fill, 4 , 5, 0, 0, 0., w, h, fb_ptr)),
+        ("TorusKnotP" , 15902, &|| rast_draw(1, RenderMode::Fill, 6 , 5, 0, 0, 0., w, h, fb_ptr)),
+        ("CubeP"      , 17991, &|| rast_draw(1, RenderMode::Fill, 9 , 5, 0, 0, 0., w, h, fb_ptr)),
+        ("CornellBoxP", 19920, &|| rast_draw(1, RenderMode::Fill, 11, 5, 0, 0, 0., w, h, fb_ptr))
     ];
 
     // Run once so all the one-time initialization etc. is done
@@ -1816,17 +1817,22 @@ pub extern fn rast_draw(shade_per_pixel: i32,
                         h: i32,
                         fb: *mut u32) {
     // Transform, rasterize and shade mesh
+
+    //unsafe { ptr::write_bytes(fb, 0x7F, (w * h) as usize); }
     //return;
+
     /*
-    let mut fb_v: Vec<u32> = Vec::new();
-    fb_v.resize((w * h) as usize, 0);
-    let fb = fb_v.as_mut_ptr();
+    let mut fb: Vec<u32> = Vec::with_capacity((w * h) as usize);
+    unsafe { fb.set_len((w * h) as usize); }
+    let fb = fb.as_mut_ptr();
     */
+
+    //let start = PreciseTime::now();
 
     // Avoid passing a bool over the FFI, convert now
     let shade_per_pixel: bool = shade_per_pixel != 0;
 
-    // let tick: f64 = 0.0;
+    let tick: f64 = 0.0;
 
     // Scene (mesh, camera, shader, environment, background)
     let (_, camera, mesh)    = mesh_by_idx(mesh_idx);
@@ -1908,5 +1914,13 @@ pub extern fn rast_draw(shade_per_pixel: i32,
     if show_cm {
         cm.draw_cross(10, 10, w, h, fb);
     }
+
+    /*
+    let end = PreciseTime::now();
+    let duration = start.to(end).num_microseconds().unwrap() as f64 / 1000.0;
+    println!("{:.2}ms", duration);
+    */
+
+    //unsafe { ptr::copy_nonoverlapping(fb, fb_out, (w * h) as usize); }
 }
 

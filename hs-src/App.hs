@@ -20,6 +20,7 @@ import qualified Graphics.Rendering.OpenGL as GL
 import qualified Graphics.UI.GLFW as GLFW
 import Text.Printf
 import Data.Time
+import Data.List
 import Data.Maybe
 
 import AppDefs

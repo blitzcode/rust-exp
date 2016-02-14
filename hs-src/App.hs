@@ -96,6 +96,29 @@ draw = do
         GL.depthFunc GL.$= Just GL.Lequal
     -- Allow the experiment to draw into the framebuffer
     runExperimentState $ experimentDraw _aeFB _asCurTick
+
+    {-
+    ftStr          <- updateAndReturnFrameTimes
+    (fbWdh, fbHgt) <- liftIO $ getFrameBufferDim _aeFB
+    expDesc        <- use asExperimentDesc
+    vsync          <- use asVSync
+    statusString   <- (++) ( "2x[ESC] Exit | Screensho[T] | %ix%i | %s\n" ++
+                             "[V]Sync: %s | Exp. [-][=] %s | "
+                           )
+                      <$> runExperimentState experimentStatusString
+    when ((round (_asCurTick * 90) :: Int) `mod` 90 == 0) .
+        liftIO . traceS TLInfo $ printf statusString
+                                        fbWdh
+                                        fbHgt
+                                        ftStr
+                                        (if vsync then "On" else "Off")
+                                        expDesc
+    -}
+ {-
+    (liftIO $ GLFW.getFramebufferSize _aeWindow) >>= \(w, h) -> do
+      time <- fst <$> (timeIt . void . withQuadRenderBuffer _aeQR w h $ \qb -> liftIO $ drawFrameBuffer _aeFB qb 0 0 (fromIntegral w) (fromIntegral h))
+      liftIO . traceS TLInfo $ printf "draw QRB: %.2fms" (time * 1000)
+-}
     -- Render everything quad based
     (liftIO $ GLFW.getFramebufferSize _aeWindow) >>= \(w, h) ->
         void . withQuadRenderBuffer _aeQR w h $ \qb -> do
@@ -206,7 +229,7 @@ run env st =
                 -- GL.finish
                 GLFW.swapBuffers window
                 GLFW.pollEvents
-                traceOnGLError $ Just "main loop"
+                --traceOnGLError $ Just "main loop"
             -- Drop the first three frame deltas, they are often outliers
             use asFrameIdx >>= \idx -> when (idx < 3) (asFrameTimes %= BS.clear)
             asFrameIdx += 1

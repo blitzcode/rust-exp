@@ -1816,6 +1816,12 @@ pub extern fn rast_draw(shade_per_pixel: i32,
                         h: i32,
                         fb: *mut u32) {
     // Transform, rasterize and shade mesh
+    //return;
+    /*
+    let mut fb_v: Vec<u32> = Vec::new();
+    fb_v.resize((w * h) as usize, 0);
+    let fb = fb_v.as_mut_ptr();
+    */
 
     // Avoid passing a bool over the FFI, convert now
     let shade_per_pixel: bool = shade_per_pixel != 0;

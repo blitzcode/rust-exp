@@ -31,6 +31,7 @@ import qualified Codec.Picture as JP
 import GLHelpers
 import QuadRendering
 import Trace
+import Timing
 
 -- Simple 'frame buffer' interface where we can either directly write into an RGBA8 vector CPU
 -- side or render into a texture with the GPU and have it appear on screen, optionally with
@@ -115,7 +116,11 @@ fillFrameBuffer fb@(FrameBuffer { .. }) f = do
     -- the mapping operation will fail as OpenGL does not allow two concurrent mappings. Hence,
     -- no need to check for this explicitly
     (w, h) <- liftIO $ readIORef fbDim
-    r <- control $ \run -> liftIO $ do
+    r <- control $ \run -> liftIO $
+      {-
+      newForeignPtr_ nullPtr >>= \fpPBO ->
+        run $ Just <$> f w h (VSM.unsafeFromForeignPtr0 fpPBO $ fbSizeB w h)
+      -}
       let bindPBO = GL.bindBuffer GL.PixelUnpackBuffer GL.$= Just fbPBO
           -- Prevent stalls by just allocating new PBO storage every time
        in bindPBO >> allocPBO fb >> GL.withMappedBuffer
@@ -137,7 +142,8 @@ fillFrameBuffer fb@(FrameBuffer { .. }) f = do
     liftIO $ do
       -- Update frame buffer texture from the PBO data
       GL.textureBinding GL.Texture2D GL.$= Just fbTex
-      texImage2DNullPtr w h
+      time <- fst <$> (timeIt $ texImage2DNullPtr w h)
+      --traceS TLInfo $ printf "texImage2DNullPtr: %.2fms" (time * 1000)
       when (fbDownscaling == HighQualityDownscaling) $
           GLR.glGenerateMipmap GLR.GL_TEXTURE_2D
       -- Done

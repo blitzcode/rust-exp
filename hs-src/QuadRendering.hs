@@ -81,6 +81,23 @@ bindAllocateDynamicBO bo target size = do
                                , GL.StreamDraw -- Dynamic
                                )
 
+allocVBO :: QuadRenderer -> IO ()
+allocVBO QuadRenderer { .. } = do
+    let szf           = sizeOf (0 :: Float)
+        numfloat      = qrTotalStride * qrMaxVtx
+    GL.bufferData GL.ArrayBuffer GL.$= ( fromIntegral $ numfloat * szf -- In bytes
+                                       , nullPtr       -- Just allocate
+                                       , GL.StreamDraw -- Dynamic
+                                       )
+
+allocEBO :: QuadRenderer -> IO ()
+allocEBO QuadRenderer { .. } = do
+   let numIdx = qrMaxTri * 3
+       szi    = sizeOf(0 :: GL.GLuint)
+   GL.bufferData GL.ElementArrayBuffer GL.$= ( fromIntegral $ numIdx * szi -- In bytes
+                                             , nullPtr       -- Just allocate
+                                             , GL.StreamDraw -- Dynamic
+                                             )
 setAttribArray :: GL.GLuint
                -> Int
                -> Int
@@ -197,7 +214,7 @@ withQuadRenderBuffer qbQR@(QuadRenderer { .. }) w h f = do
         let bindVBO = GL.bindBuffer GL.ArrayBuffer GL.$= Just qrVBO
             -- TODO: We could use glMapBufferRange instead and safe some work for
             --       partially filled buffers, get asynchronous transfers etc.
-        in  bindVBO >> GL.withMappedBuffer -- VBO
+        in  bindVBO >> allocVBO qbQR >> GL.withMappedBuffer -- VBO
                 GL.ArrayBuffer
                 GL.WriteOnly
                 ( \ptrVBO -> newForeignPtr_ ptrVBO >>= \fpVBO ->
@@ -231,12 +248,12 @@ withQuadRenderBuffer qbQR@(QuadRenderer { .. }) w h f = do
 
 -- Internal function to draw the contents of a render buffer once we're done filling it
 drawRenderBuffer :: QuadRenderBuffer -> Int -> Int -> IO Bool
-drawRenderBuffer (QuadRenderBuffer { .. }) w h = do
+drawRenderBuffer QuadRenderBuffer { .. } w h = do
     let QuadRenderer { .. } = qbQR
     GL.bindVertexArrayObject GL.$= Just qrVAO
     numQuad <- readIORef qbNumQuad
     attribs <- sortAttributes qbAttribs numQuad
-    eboSucc <- fillEBO qrMaxTri attribs
+    eboSucc <- fillEBO qbQR qrMaxTri attribs
     if not eboSucc
       then return False
       else do
@@ -312,8 +329,9 @@ sortAttributes attribs numQuad =
 
 -- Build EBO from state sorted attributes. This benchmarked slightly faster than doing
 -- drawing in a single pass with ad-hoc index buffer building
-fillEBO :: Int -> [[QuadRenderAttrib]] -> IO Bool -- Return false on mapping failure
-fillEBO maxTri attribs = do
+fillEBO :: QuadRenderer -> Int -> [[QuadRenderAttrib]] -> IO Bool -- Return false on mapping failure
+fillEBO qr maxTri attribs = do
+    allocEBO qr
     GL.withMappedBuffer -- EBO, this assumes a matching VAO has been bound
       GL.ElementArrayBuffer
       GL.WriteOnly

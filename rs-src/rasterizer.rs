@@ -721,6 +721,44 @@ fn lookup_dir_cm(cm: &CM, dir: &V3F) -> V3F {
     lookup_texel_cm(cm, cm_texel_from_dir(dir))
 }
 
+#[allow(dead_code)]
+fn cm_texel_to_dir(face: CMFaceName, x: i32, y: i32) -> V3F {
+    // Convert a texel position on a cube map face into a direction
+
+    let vw = (x as f32 + 0.5) / CM_FACE_WDH as f32 * 2.0 - 1.0;
+    let vh = (y as f32 + 0.5) / CM_FACE_WDH as f32 * 2.0 - 1.0;
+
+    na::normalize(&match face {
+        CMFaceName::XPos => V3F::new( 1.0,   vh,   vw),
+        CMFaceName::XNeg => V3F::new(-1.0,   vh,   vw),
+        CMFaceName::YPos => V3F::new(  vw,  1.0,   vh),
+        CMFaceName::YNeg => V3F::new(  vw, -1.0,   vh),
+        CMFaceName::ZPos => V3F::new(  vw,   vh,  1.0),
+        CMFaceName::ZNeg => V3F::new(  vw,   vh, -1.0)
+    })
+}
+
+// Normalization cube map, used as a lookup table for vector normalization
+lazy_static! {
+    static ref _CM_NORMALIZE:[Vec<V3F>; 6] = {
+        let build_face = |face: CMFaceName| -> Vec<V3F> {
+            let mut v: Vec<V3F> = Vec::new();
+            v.resize((CM_FACE_WDH * CM_FACE_WDH) as usize, V3F::new(0.0, 0.0, 0.0));
+            for y in 0..CM_FACE_WDH {
+                for x in 0..CM_FACE_WDH {
+                    v[(x + y * CM_FACE_WDH) as usize] = cm_texel_to_dir(face, x, y);
+                }
+            }
+            v
+        };
+
+        [ build_face(CMFaceName::XPos), build_face(CMFaceName::XNeg),
+          build_face(CMFaceName::YPos), build_face(CMFaceName::YNeg),
+          build_face(CMFaceName::ZPos), build_face(CMFaceName::ZNeg)
+        ]
+    };
+}
+
 #[no_mangle]
 pub extern fn rast_get_num_cm_sets() -> i32 { 9 }
 

@@ -45,7 +45,7 @@ fn min3<T: PartialOrd>(a: T, b: T, c: T) -> T {
 }
 
 fn face_normal(v0: &P3F, v1: &P3F, v2: &P3F) -> V3F {
-    fast_normalize(&na::cross(&(*v1 - *v0), &(*v2 - *v0)))
+    na::normalize(&na::cross(&(*v1 - *v0), &(*v2 - *v0)))
 }
 
 fn fast_normalize(n: &V3F) -> V3F {
@@ -609,16 +609,13 @@ fn load_cm(power: i32, path: &String) -> CM {
 
     // The cube maps we load are oriented like OpenGL expects them, which is actually
     // rather strange. Flip and mirror so it's convenient for the way we do lookups
-    let cm = [
-        load_cm_face(&cm_fn_from_param(path, power, CMFaceName::XPos), true , true ),
-        load_cm_face(&cm_fn_from_param(path, power, CMFaceName::XNeg), false, true ),
-        load_cm_face(&cm_fn_from_param(path, power, CMFaceName::YPos), false, false),
-        load_cm_face(&cm_fn_from_param(path, power, CMFaceName::YNeg), false, true ),
-        load_cm_face(&cm_fn_from_param(path, power, CMFaceName::ZPos), false, true ),
-        load_cm_face(&cm_fn_from_param(path, power, CMFaceName::ZNeg), true , true )
-    ];
-
-    cm
+    [ load_cm_face(&cm_fn_from_param(path, power, CMFaceName::XPos), true , true ),
+      load_cm_face(&cm_fn_from_param(path, power, CMFaceName::XNeg), false, true ),
+      load_cm_face(&cm_fn_from_param(path, power, CMFaceName::YPos), false, false),
+      load_cm_face(&cm_fn_from_param(path, power, CMFaceName::YNeg), false, true ),
+      load_cm_face(&cm_fn_from_param(path, power, CMFaceName::ZPos), false, true ),
+      load_cm_face(&cm_fn_from_param(path, power, CMFaceName::ZNeg), true , true )
+    ]
 }
 
 fn draw_cm_cross_buffer(cm: &CM) -> (Vec<u32>, i32, i32) {

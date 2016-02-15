@@ -7,7 +7,7 @@ This project contains a number of experiments in the simulation / graphics categ
 
 Experiments include...
 
-- **Software rasterizer** using half-space functions, doing perspective, sub-pixel and gamma correct, gap-less rasterization, a variety of shaders, switchable between vertex and pixel shading, does IBL based on pre-filtered irradiance cubemaps, has different scenes, many with baked ambient occlusion or radiosity
+- **Software rasterizer** using half-space functions, doing perspective and sub-pixel correct, gap-less rasterization, a variety of shaders, switchable between vertex and pixel shading, does IBL based on pre-filtered irradiance cubemaps, has different scenes, many with baked ambient occlusion or radiosity
 - Gravitational **N-Body simulation**, both a brute force O(N^2) and the O(n log n) Barnes-Hut algorithm are implemented, adjustable time step and cutoff criteria, rendering of alpha blended particles with tails, parallelized
 - The famous **'Game of Life' cellular automata**, with a reasonably optimized and parallelized implementation plus recallable patterns
 
@@ -15,7 +15,7 @@ Experiments include...
 
 [Rust projects on Blitzcode.net](http://www.blitzcode.net/rust.shtml)
 
-The Haskell application itself might also be of interests. It features a pluggable experiment framework, modern OpenGL 3/4.x style rendering, fonts, quad rendering, screenshots, framebuffer system, FPS counter, benchmarking, GLSL, logging etc. A good starting point for your own Haskell + OpenGL adventures.
+The Haskell application itself might also be of interests. It features a pluggable experiment framework, modern OpenGL 3/4.x style rendering, text, quad rendering, screenshots, framebuffer system, FPS counter, benchmarking, GLSL, logging etc. A good starting point for your own Haskell + OpenGL adventures.
 
 # Building
 

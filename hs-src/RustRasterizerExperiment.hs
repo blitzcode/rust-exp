@@ -61,7 +61,6 @@ makeLenses ''RustRasterizerExperiment
 
 instance Experiment RustRasterizerExperiment where
     withExperiment f = do
-        rastBenchmark
         num_mesh   <- fromIntegral <$> rastGetNumMeshes
         num_shader <- fromIntegral <$> rastGetNumShaders
         num_cm     <- fromIntegral <$> rastGetNumCMSets
@@ -104,7 +103,7 @@ instance Experiment RustRasterizerExperiment where
         cm_name     <- liftIO $ rastGetCMSetName  cm_idx     >>= peekCString
         return $ printf ( "%.1fFPS/%.2fms | [M]ode: %s\n" ++
                           "%s | Background [1][2] %s | Mesh [Q][W] %s: %s (%s)\n" ++
-                          "Shader [A][S] %s: %s | Environment [Z][X] %s: %s"
+                          "Shader [A][S] %s: %s | Env [Z][X] %s: %s | [B]enchmark"
                         )
                         (1 / avgtime)
                         (avgtime * 1000)
@@ -129,6 +128,7 @@ instance Experiment RustRasterizerExperiment where
         case ev of
             GLFWEventKey _win k _sc ks _mk | ks == GLFW.KeyState'Pressed ->
                 case k of
+                    GLFW.Key'B -> liftIO rastBenchmark
                     GLFW.Key'M -> rrMode          %= wrapSucc
                     GLFW.Key'P -> rrShadePerPixel %= not
                     GLFW.Key'Q -> rrMeshIdx       %= idxPred

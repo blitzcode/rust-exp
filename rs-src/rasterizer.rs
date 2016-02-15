@@ -1754,7 +1754,7 @@ pub extern fn rast_benchmark() {
     fb.resize((w * h) as usize, 0);
     let fb_ptr = fb.as_mut_ptr();
 
-    // Benchmark name, reference and function
+    // Benchmark name, reference speed and function
     let benchmarks:[(&str, i64, &Fn() -> ()); 12] = [
         ("KillerooV"  , 4507 , &|| rast_draw(0, RenderMode::Fill, 0 , 5, 0, 0, 0., w, h, fb_ptr)),
         ("HeadV"      , 6754 , &|| rast_draw(0, RenderMode::Fill, 1 , 5, 0, 0, 0., w, h, fb_ptr)),
@@ -1778,7 +1778,7 @@ pub extern fn rast_benchmark() {
     timings.resize(benchmarks.len(), i64::MAX);
 
     // Run all benchmarks multiple times
-    let num_runs = 20;
+    let num_runs = 25;
     for _ in 0..num_runs  {
         for i in 0..benchmarks.len() {
             // Measure and run

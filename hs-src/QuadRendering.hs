@@ -193,34 +193,36 @@ withQuadRenderBuffer qbQR@(QuadRenderer { .. }) w h f = do
     -- Map. If this function is nested inside a withQuadRenderBuffer with the same QuadRenderer,
     -- the mapping operation will fail as OpenGL does not allow two concurrent mappings. Hence,
     -- no need to check for this explicitly
-    r <- control $ \run -> liftIO $
+    liftIO $ traceOnGLError (Just "1")
+    r <- control $ \run -> liftIO $ do
+        -- Reallocate VBO to prevent stall
+        let szf      = sizeOf (0 :: Float)
+            numfloat = qrTotalStride * qrMaxVtx
+        bindAllocateDynamicBO qrVBO GL.ArrayBuffer (numfloat * szf)
         let bindVBO = GL.bindBuffer GL.ArrayBuffer GL.$= Just qrVBO
-            -- TODO: We could use glMapBufferRange instead and safe some work for
-            --       partially filled buffers, get asynchronous transfers etc.
-        in  bindVBO >> GL.withMappedBuffer -- VBO
-                GL.ArrayBuffer
-                GL.WriteOnly
-                ( \ptrVBO -> newForeignPtr_ ptrVBO >>= \fpVBO ->
-                      let numfloat = qrMaxVtx * qrTotalStride
-                          qbVBOMap = VSM.unsafeFromForeignPtr0 fpVBO numfloat
-                      in  do qbNumQuad <- newIORef 0
-                             qbAttribs <- VM.new qrMaxQuad
-                             finally
-                                 ( run $ do -- Run in outer base monad
-                                       let qb = QuadRenderBuffer { .. }
-                                       r <- f qb
-                                       return $ Just (r, qb)
-                                 )
-                                 bindVBO -- Make sure we rebind our VBO, otherwise
-                                         -- unmapping might fail if the inner
-                                         -- modified the bound buffer objects
-                )
-                ( \mf -> do traceS TLError $
-                                "withQuadRenderBuffer - VBO mapping failure: " ++ show mf
-                            -- Looks like since the 1.0.0.0 change in monad-control we need
-                            -- some type annotations for this to work
-                            run $ (return Nothing :: m (Maybe (a, QuadRenderBuffer)))
-                )
+         in GL.withMappedBuffer
+            GL.ArrayBuffer
+            GL.WriteOnly
+            ( \ptrVBO -> newForeignPtr_ ptrVBO >>= \fpVBO ->
+                  let qbVBOMap = VSM.unsafeFromForeignPtr0 fpVBO numfloat
+                  in  do qbNumQuad <- newIORef 0
+                         qbAttribs <- VM.new qrMaxQuad
+                         finally
+                             ( run $ do -- Run in outer base monad
+                                   let qb = QuadRenderBuffer { .. }
+                                   r <- f qb
+                                   return $ Just (r, qb)
+                             )
+                             bindVBO -- Make sure we rebind our VBO, otherwise
+                                     -- unmapping might fail if the inner
+                                     -- modified the bound buffer objects
+            )
+            ( \mf -> do traceS TLError $
+                            "withQuadRenderBuffer - VBO mapping failure: " ++ show mf
+                        -- Looks like since the 1.0.0.0 change in monad-control we need
+                        -- some type annotations for this to work
+                        run $ (return Nothing :: m (Maybe (a, QuadRenderBuffer)))
+            )
     case r of
         Nothing       -> return Nothing
         Just (ra, qb) -> liftIO $ do
@@ -236,7 +238,7 @@ drawRenderBuffer (QuadRenderBuffer { .. }) w h = do
     GL.bindVertexArrayObject GL.$= Just qrVAO
     numQuad <- readIORef qbNumQuad
     attribs <- sortAttributes qbAttribs numQuad
-    eboSucc <- fillEBO qrMaxTri attribs
+    eboSucc <- fillEBO qrMaxTri qrEBO attribs
     if not eboSucc
       then return False
       else do
@@ -312,14 +314,17 @@ sortAttributes attribs numQuad =
 
 -- Build EBO from state sorted attributes. This benchmarked slightly faster than doing
 -- drawing in a single pass with ad-hoc index buffer building
-fillEBO :: Int -> [[QuadRenderAttrib]] -> IO Bool -- Return false on mapping failure
-fillEBO maxTri attribs = do
-    GL.withMappedBuffer -- EBO, this assumes a matching VAO has been bound
+fillEBO :: Int -> GL.BufferObject -> [[QuadRenderAttrib]] -> IO Bool
+fillEBO maxTri ebo attribs = do
+    -- Reallocate EBO to prevent stalls
+    let numIdx = maxTri * 3
+        szi    = sizeOf(0 :: GL.GLuint)
+    bindAllocateDynamicBO ebo GL.ElementArrayBuffer $ numIdx * szi
+    GL.withMappedBuffer
       GL.ElementArrayBuffer
       GL.WriteOnly
       ( \ptrEBO -> newForeignPtr_ ptrEBO >>= \fpEBO ->
-          let !numIdx = 3 * maxTri
-              !eboMap = VSM.unsafeFromForeignPtr0 fpEBO numIdx :: VSM.IOVector GL.GLuint
+          let !eboMap = VSM.unsafeFromForeignPtr0 fpEBO numIdx :: VSM.IOVector GL.GLuint
           in  do foldM_ -- Fold over draw call groups
                    ( \r a -> do
                        n <- foldM
@@ -344,6 +349,7 @@ fillEBO maxTri attribs = do
                  return True
       )
       ( \mf -> do traceS TLError $ "drawRenderBuffer - EBO mapping failure: " ++ show mf
+                  -- Return false on mapping failure
                   return False
       )
 

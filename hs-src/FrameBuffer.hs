@@ -37,6 +37,8 @@ import Trace
 -- super sampling
 
 data FrameBuffer = FrameBuffer { fbTex         :: !GL.TextureObject
+                                 -- Ping-pong with two PBOs doesn't seem to help upload 
+                                 -- speed as long as we orphan our buffers anyway
                                , fbPBO         :: !GL.BufferObject
                                , fbDim         :: IORef (Int, Int)
                                , fbFBO         :: !GL.FramebufferObject
@@ -96,7 +98,13 @@ resizeFrameBuffer fb w h = do
     writeIORef (fbDim fb) (clampHW, clampHH)
     -- Allocate texture and clear contents to black
     GL.textureBinding GL.Texture2D GL.$= Just (fbTex fb)
-    texImage2DNullPtr clampHW clampHH
+    GL.texImage2D GL.Texture2D
+                  GL.NoProxy
+                  0
+                  GL.RGBA8
+                  (GL.TextureSize2D (fromIntegral clampHW) (fromIntegral clampHH))
+                  0
+                  (GL.PixelData GL.RGBA GL.UnsignedByte nullPtr)
     GL.textureBinding GL.Texture2D GL.$= Nothing
     void . drawIntoFrameBuffer fb $ \_ _ -> do
         GL.clearColor GL.$= (GL.Color4 0 0 0 1 :: GL.Color4 GL.GLclampf)
@@ -137,24 +145,17 @@ fillFrameBuffer fb@(FrameBuffer { .. }) f = do
     liftIO $ do
       -- Update frame buffer texture from the PBO data
       GL.textureBinding GL.Texture2D GL.$= Just fbTex
-      texImage2DNullPtr w h
+      GL.texSubImage2D GL.Texture2D
+                       0
+                       (GL.TexturePosition2D 0 0)
+                       (GL.TextureSize2D (fromIntegral w) (fromIntegral h))
+                       (GL.PixelData GL.RGBA GL.UnsignedByte nullPtr)
       when (fbDownscaling == HighQualityDownscaling) $
           GLR.glGenerateMipmap GLR.GL_TEXTURE_2D
       -- Done
       GL.bindBuffer GL.PixelUnpackBuffer GL.$= Nothing
       GL.textureBinding GL.Texture2D GL.$= Nothing
     return r
-
--- TODO: Could use immutable textures through glTexStorage + glTexSubImage
-texImage2DNullPtr :: Int -> Int -> IO ()
-texImage2DNullPtr w h =
-    GL.texImage2D GL.Texture2D
-                  GL.NoProxy
-                  0
-                  GL.RGBA8
-                  (GL.TextureSize2D (fromIntegral w) (fromIntegral h))
-                  0
-                  (GL.PixelData GL.RGBA GL.UnsignedByte nullPtr)
 
 -- Specify the frame buffer contents by rendering into it
 -- http://www.opengl-tutorial.org/intermediate-tutorials/tutorial-14-render-to-texture/

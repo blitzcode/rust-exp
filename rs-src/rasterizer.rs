@@ -775,15 +775,32 @@ fn cm_set_by_idx<'a>(idx: i32) -> (&'a str, &'a IrradianceCMSet) {
 // -------
 //
 
-// All shaders have this signature
-type Shader = fn(&V3F,                // World space position
-                 &V3F,                // World space normal
-                 &V3F,                // Color (usually baked AO / radiosity)
-                 &P3F,                // World space camera position
-                 f64,                 // Current time (tick)
-                 &IrradianceCMSet) -> // Current environment cube map set
-                 V3F;                 // Output color
+struct ShaderParam<'a> {
+    p: V3F,            // World space position
+    n: V3F,            // World space normal
+    col: V3F,            // Color (usually baked AO / radiosity)
+    eye: P3F,            // World space camera position
+    tick: f64,             // Current time (tick)
+    cm: &'a IrradianceCMSet // Current environment cube map set
+}
 
+// All shaders have this signature
+type Shader = fn(&ShaderParam) -> V3F;
+
+fn shader_cm_refl(p: &ShaderParam) -> V3F {
+    let n     = fast_normalize(&p.n);
+    let eye   = p.p - p.eye.to_vec();
+    let r     = reflect(&eye, &n);
+    let r_tex = cm_texel_from_dir(&r);
+
+    ( lookup_dir_cm  (&p.cm.cos_1 , &n)
+    + lookup_texel_cm(&p.cm.cos_8 , r_tex) * normalize_phong_lobe(8.0 )
+    + lookup_texel_cm(&p.cm.cos_64, r_tex) * normalize_phong_lobe(64.0)
+    )
+    * (p.col * p.col)
+}
+
+/*
 fn shader_color(_: &V3F, _: &V3F, col: &V3F, _: &P3F, _: f64, _: &IrradianceCMSet) -> V3F {
     *col
 }
@@ -830,12 +847,14 @@ fn shader_dir_light(p: &V3F, n: &V3F, col: &V3F, eye: &P3F, _tick: f64,
 
     light * occlusion
 }
+*/
 
 fn normalize_phong_lobe(power: f32) -> f32
 {
     (power + 2.0) * 0.5
 }
 
+/*
 fn shader_cm_diffuse(_p: &V3F, n: &V3F, col: &V3F, _eye: &P3F, _tick: f64,
                      cm: &IrradianceCMSet) -> V3F {
     let n = fast_normalize(n);
@@ -990,7 +1009,7 @@ fn shader_cm_blinn_schlick(p: &V3F, n: &V3F, col: &V3F, eye: &P3F, _tick: f64,
     + (lookup_dir_cm(&cm.cos_64, &h) * normalize_phong_lobe(64.0) * (1.25 - w))
     )
     * (*col * *col)
-}
+}*/
 
 fn fresnel_conductor(
     cosi: f32, // Cosine between normal and incident ray
@@ -1097,6 +1116,7 @@ pub extern fn rast_get_shader_name(idx: i32) -> *const u8 { shader_by_idx(idx).0
 fn shader_by_idx<'a>(idx: i32) -> (&'a str, bool, Shader) {
     // Retrieve shader name, cube map usage and function by its index
 
+    /*
     let shaders: [(&str, bool, Shader); 16] = [
         // Null terminated names so we can easily pass them as C strings
         ("BakedColor\0"       , false, shader_color             ),
@@ -1123,6 +1143,8 @@ fn shader_by_idx<'a>(idx: i32) -> (&'a str, bool, Shader) {
     }
 
     shaders[idx as usize]
+    */
+    ("CMRefl", true, shader_cm_refl)
 }
 
 //
@@ -1669,7 +1691,14 @@ macro_rules! mk_rasterizer {
                                             n2 * inv_w_2 * b0) * w_raster;
 
                             // Call shader
-                            shader(&p_raster, &n_raster, &c_raster, &eye, tick, cm)
+                            shader(&ShaderParam {
+                                p: p_raster,
+                                n: n_raster,
+                                col: c_raster,
+                                eye: *eye,
+                                tick: tick,
+                                cm: cm
+                            })
                         } else {
                             // Just write interpolated per-vertex shading result
                             c_raster
@@ -1850,7 +1879,14 @@ pub extern fn rast_draw(shade_per_pixel: i32,
     // Do vertex shading?
     if !shade_per_pixel && mode == RenderMode::Fill {
         for vtx in &mut vtx_transf {
-            vtx.col = shader(&vtx.world, &vtx.n, &vtx.col, &eye, tick, cm);
+            vtx.col = shader(&ShaderParam {
+                p:    vtx.world,
+                n:    vtx.n,
+                col:  vtx.col,
+                eye:  eye,
+                tick: tick,
+                cm:   cm
+            });
         }
     }
 

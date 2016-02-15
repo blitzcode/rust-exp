@@ -1221,9 +1221,15 @@ fn transform_vertices(mesh: &Mesh, w: i32, h: i32, eye: &P3F) -> Vec<Transformed
 
         // Multiply with the 3x3 IT for world space normals
         dst.n = mesh_to_world_it_33 * src.n;
+        dst.n.x *= inv_w;
+        dst.n.y *= inv_w;
+        dst.n.z *= inv_w;
 
         // Copy color
         dst.col = src.col;
+        dst.col.x *= inv_w;
+        dst.col.y *= inv_w;
+        dst.col.z *= inv_w;
     }
 
     vtx_transf
@@ -1634,6 +1640,20 @@ macro_rules! mk_rasterizer {
         let fp_dx10 = dx10 << 4; let fp_dy01 = dy01 << 4; let fp_dx21 = dx21 << 4;
         let fp_dy12 = dy12 << 4; let fp_dx02 = dx02 << 4; let fp_dy20 = dy20 << 4;
 
+        // During vertex processing we already replaced w with 1/w
+        let inv_w_0 = v0.w;
+        let inv_w_1 = v1.w;
+        let inv_w_2 = v2.w;
+
+        let inv_w_a = inv_w_1 - inv_w_0;
+        let inv_w_b = inv_w_2 - inv_w_0;
+        let c_a = c1  - c0  ;
+        let c_b = c2  - c0  ;
+        let p_a = p1  -  p0 ;
+        let p_b = p2  -  p0 ;
+        let n_a = n1  -  n0 ;
+        let n_b = n2  -  n0 ;
+
         for y in min_y..max_y {
             // Starting point for X stepping
             let mut e0x = e0y;
@@ -1676,32 +1696,29 @@ macro_rules! mk_rasterizer {
                         // Write depth
                         unsafe { *d = z };
 
-                        // During vertex processing we already replaced w with 1/w
-                        let inv_w_0 = v0.w;
-                        let inv_w_1 = v1.w;
-                        let inv_w_2 = v2.w;
-
                         // To do perspective correct interpolation of attributes we need
                         // to know w at the current raster position. We can compute it by
                         // interpolating 1/w linearly and then taking the reciprocal
-                        let w_raster = 1.0 / (inv_w_0 * b1 + inv_w_1 * b2 + inv_w_2 * b0);
+                        //let w_raster = 1.0 / (inv_w_0 * b1 + inv_w_1 * b2 + inv_w_2 * b0);
+
+                        let w_raster = 1.0 / (inv_w_0 + inv_w_a * b2 + inv_w_b * b0);
 
                         // Interpolate color. Perspective correct interpolation requires us to
                         // linearly interpolate col/w and then multiply by w
-                        let c_raster = (c0 * inv_w_0 * b1 +
-                                        c1 * inv_w_1 * b2 +
-                                        c2 * inv_w_2 * b0) * w_raster;
+                        let c_raster = (c0  +
+                                        c_a * b2 +
+                                        c_b * b0) * w_raster;
 
                         // Shading
                         let out = if $shade_per_pixel {
                             // Also do perspective correct interpolation of the vertex normal
                             // and world space position, the shader might want these
-                            let p_raster = (p0 * inv_w_0 * b1 +
-                                            p1 * inv_w_1 * b2 +
-                                            p2 * inv_w_2 * b0) * w_raster;
-                            let n_raster = (n0 * inv_w_0 * b1 +
-                                            n1 * inv_w_1 * b2 +
-                                            n2 * inv_w_2 * b0) * w_raster;
+                            let p_raster = (p0  +
+                                            p_a * b2 +
+                                            p_b * b0) * w_raster;
+                            let n_raster = (n0 +
+                                            n_a * b2 +
+                                            n_b * b0) * w_raster;
 
                             // Call shader
                             shader(&p_raster, &n_raster, &c_raster, &eye, tick, cm)

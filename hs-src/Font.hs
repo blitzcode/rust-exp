@@ -80,7 +80,7 @@ drawText tex qb x y color str = do
 extractByte :: Word32 -> Int -> Word8
 extractByte x i = fromIntegral $ (x .&. (0xFF `shiftL` (i * 8))) `shiftR` (i * 8)
 
--- Bit packed font data for a 16 x 16 charcter grid of 6 x 12 pixel characters
+-- Bit packed font data for a 16 x 16 character grid of 6 x 12 pixel characters
 fontGridWdh, fontGridHgt, fontImgWdh, fontImgHgt, fontCharWdh, fontCharHgt, fontTexWdh :: Int
 fontGridWdh = 16
 fontGridHgt = 16
@@ -89,6 +89,7 @@ fontImgHgt  = 192
 fontCharWdh = 6
 fontCharHgt = 12
 fontTexWdh  = 256
+{-# NOINLINE miscFixed6x12Data #-}
 miscFixed6x12Data :: [Word32]
 miscFixed6x12Data =
     [ 0x00000000, 0x00000000, 0x20080200, 0x00000000, 0x00000000, 0x10080100, 0x711c2772, 0xc7f100c7

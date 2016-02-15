@@ -677,13 +677,8 @@ fn draw_cm_cross_buffer(cm: &CM) -> (Vec<u32>, i32, i32) {
     (cross, cross_wdh, cross_hgt)
 }
 
-fn lookup_cm(cm: &CM, dir: &V3F) -> V3F {
-    // Fetch the closest texel pointed at by 'dir' from passed cube map
-
-    // TODO: Write version with bilinear filtering
-
-    // TODO: Separate lookup and coordinate generation, allowing us to re-use
-    //       coordinates when looking up into multiple cube maps with the same vector
+fn cm_texel_from_dir(dir: &V3F) -> (CMFaceName, i32)  {
+    // Find the closest cube map texel pointed at by 'dir'
 
     let face;
     let mut u;
@@ -714,9 +709,16 @@ fn lookup_cm(cm: &CM, dir: &V3F) -> V3F {
     let tx = na::clamp((u * CM_FACE_WDH as f32) as i32, 0, CM_FACE_WDH - 1);
     let ty = na::clamp((v * CM_FACE_WDH as f32) as i32, 0, CM_FACE_WDH - 1);
 
-    // Lookup
-    let idx = tx + ty * CM_FACE_WDH;
+    (face, tx + ty * CM_FACE_WDH)
+}
+
+fn lookup_texel_cm(cm: &CM, texel: (CMFaceName, i32)) -> V3F  {
+    let (face, idx) = texel;
     unsafe { *cm.get_unchecked(face as usize).get_unchecked(idx as usize) }
+}
+
+fn lookup_dir_cm(cm: &CM, dir: &V3F) -> V3F {
+    lookup_texel_cm(cm, cm_texel_from_dir(dir))
 }
 
 #[no_mangle]
@@ -837,18 +839,19 @@ fn normalize_phong_lobe(power: f32) -> f32
 fn shader_cm_diffuse(_p: &V3F, n: &V3F, col: &V3F, _eye: &P3F, _tick: f64,
                      cm: &IrradianceCMSet) -> V3F {
     let n = fast_normalize(n);
-    lookup_cm(&cm.cos_1, &n) * (*col * *col)
+    lookup_dir_cm(&cm.cos_1, &n) * (*col * *col)
 }
 
 fn shader_cm_refl(p: &V3F, n: &V3F, col: &V3F, eye: &P3F, _tick: f64,
                   cm: &IrradianceCMSet) -> V3F {
-    let n   = fast_normalize(n);
-    let eye = *p - *eye.as_vec();
-    let r   = &reflect(&eye, &n);
+    let n     = fast_normalize(n);
+    let eye   = *p - *eye.as_vec();
+    let r     = reflect(&eye, &n);
+    let r_tex = cm_texel_from_dir(&r);
 
-    ( lookup_cm(&cm.cos_1 , &n)
-    + lookup_cm(&cm.cos_8 , &r) * normalize_phong_lobe(8.0 )
-    + lookup_cm(&cm.cos_64, &r) * normalize_phong_lobe(64.0)
+    ( lookup_dir_cm  (&cm.cos_1 , &n)
+    + lookup_texel_cm(&cm.cos_8 , r_tex) * normalize_phong_lobe(8.0 )
+    + lookup_texel_cm(&cm.cos_64, r_tex) * normalize_phong_lobe(64.0)
     )
     * (*col * *col)
 }
@@ -857,12 +860,13 @@ fn shader_cm_coated(p: &V3F, n: &V3F, col: &V3F, eye: &P3F, _tick: f64,
                     cm: &IrradianceCMSet) -> V3F {
     let n       = fast_normalize(n);
     let eye     = *p - *eye.as_vec();
-    let r       = &reflect(&eye, &n);
+    let r       = reflect(&eye, &n);
+    let r_tex   = cm_texel_from_dir(&r);
     let fresnel = fresnel_conductor(na::dot(&-eye, &n), 1.0, 1.1);
 
-    ( lookup_cm(&cm.cos_1  , &n)                                         * 0.85
-    + lookup_cm(&cm.cos_8  , &r) * normalize_phong_lobe(8.0  ) * fresnel
-    + lookup_cm(&cm.cos_512, &r) * normalize_phong_lobe(512.0) * fresnel * 1.5
+    ( lookup_dir_cm  (&cm.cos_1  , &n)                                            * 0.85
+    + lookup_texel_cm(&cm.cos_8  , r_tex) * normalize_phong_lobe(8.0  ) * fresnel
+    + lookup_texel_cm(&cm.cos_512, r_tex) * normalize_phong_lobe(512.0) * fresnel * 1.5
     )
     * (*col * *col)
 }
@@ -874,17 +878,17 @@ fn shader_cm_diff_rim(p: &V3F, n: &V3F, col: &V3F, eye: &P3F, _: f64,
 
     let fresnel = fresnel_conductor(na::dot(&-eye, &n), 1.0, 1.1);
 
-    (lookup_cm(&cm.cos_1, &n) + fresnel * 0.75) * *col
+    (lookup_dir_cm(&cm.cos_1, &n) + fresnel * 0.75) * *col
 }
 
 fn shader_cm_glossy(p: &V3F, n: &V3F, col: &V3F, eye: &P3F, _tick: f64,
                     cm: &IrradianceCMSet) -> V3F {
     let n   = fast_normalize(n);
     let eye = *p - *eye.as_vec();
-    let r   = &reflect(&eye, &n);
+    let r   = reflect(&eye, &n);
 
-    ( lookup_cm(&cm.cos_1, &n)
-    + lookup_cm(&cm.cos_8, &r) * normalize_phong_lobe(8.0)
+    ( lookup_dir_cm(&cm.cos_1, &n)
+    + lookup_dir_cm(&cm.cos_8, &r) * normalize_phong_lobe(8.0)
     )
     * (*col * *col)
 }
@@ -893,10 +897,10 @@ fn shader_cm_green_highlight(p: &V3F, n: &V3F, col: &V3F, eye: &P3F, _tick: f64,
                              cm: &IrradianceCMSet) -> V3F {
     let n   = fast_normalize(n);
     let eye = *p - *eye.as_vec();
-    let r   = &reflect(&eye, &n);
+    let r   = reflect(&eye, &n);
 
-    ( lookup_cm(&cm.cos_1 , &n)
-    + lookup_cm(&cm.cos_64, &r) * normalize_phong_lobe(64.0) * Vec3::new(0.2, 0.8, 0.2)
+    ( lookup_dir_cm(&cm.cos_1 , &n)
+    + lookup_dir_cm(&cm.cos_64, &r) * normalize_phong_lobe(64.0) * Vec3::new(0.2, 0.8, 0.2)
     )
     * (*col * *col)
 }
@@ -905,35 +909,37 @@ fn shader_cm_red_material(p: &V3F, n: &V3F, col: &V3F, eye: &P3F, _tick: f64,
                           cm: &IrradianceCMSet) -> V3F {
     let n   = fast_normalize(n);
     let eye = *p - *eye.as_vec();
-    let r   = &reflect(&eye, &n);
+    let r   = reflect(&eye, &n);
 
-    ( lookup_cm(&cm.cos_1  , &n) * Vec3::new(0.8, 0.2, 0.2)
-    + lookup_cm(&cm.cos_512, &r) * normalize_phong_lobe(512.0)
+    ( lookup_dir_cm(&cm.cos_1  , &n) * Vec3::new(0.8, 0.2, 0.2)
+    + lookup_dir_cm(&cm.cos_512, &r) * normalize_phong_lobe(512.0)
     )
     * (*col * *col)
 }
 
 fn shader_cm_metallic(p: &V3F, n: &V3F, col: &V3F, eye: &P3F, _tick: f64,
                       cm: &IrradianceCMSet) -> V3F {
-    let n   = fast_normalize(n);
-    let eye = *p - *eye.as_vec();
-    let r   = &reflect(&eye, &n);
+    let n     = fast_normalize(n);
+    let eye   = *p - *eye.as_vec();
+    let r     = reflect(&eye, &n);
+    let r_tex = cm_texel_from_dir(&r);
 
-    ( lookup_cm(&cm.cos_8 , &r)
-    + lookup_cm(&cm.cos_64, &r) * normalize_phong_lobe(64.0)
+    ( lookup_texel_cm(&cm.cos_8 , r_tex) * normalize_phong_lobe(8.0 )
+    + lookup_texel_cm(&cm.cos_64, r_tex) * normalize_phong_lobe(64.0)
     )
     * (*col)
 }
 
 fn shader_cm_super_shiny(p: &V3F, n: &V3F, col: &V3F, eye: &P3F, _tick: f64,
                          cm: &IrradianceCMSet) -> V3F {
-    let n   = fast_normalize(n);
-    let eye = *p - *eye.as_vec();
-    let r   = &reflect(&eye, &n);
+    let n     = fast_normalize(n);
+    let eye   = *p - *eye.as_vec();
+    let r     = reflect(&eye, &n);
+    let r_tex = cm_texel_from_dir(&r);
 
-    ( lookup_cm(&cm.cos_64 , &r) * normalize_phong_lobe(64.0)
-    + lookup_cm(&cm.cos_512, &r) * normalize_phong_lobe(512.0)
-    + lookup_cm(&cm.cos_0  , &r)
+    ( lookup_texel_cm(&cm.cos_64 , r_tex) * normalize_phong_lobe(64.0 )
+    + lookup_texel_cm(&cm.cos_512, r_tex) * normalize_phong_lobe(512.0)
+    + lookup_texel_cm(&cm.cos_0  , r_tex)
     )
     * (*col)
 }
@@ -944,27 +950,29 @@ fn shader_cm_gold(p: &V3F, n: &V3F, col: &V3F, eye: &P3F, _tick: f64,
     let l      = fast_normalize(&(*eye.as_vec() - *p));
     let ldotn  = na::clamp(na::dot(&l, &n), 0.0, 1.0);
     let eye    = *p - *eye.as_vec();
-    let r      = &reflect(&eye, &n);
+    let r      = reflect(&eye, &n);
     let albedo = Vec3::new(1.0, 0.76, 0.33);
+    let r_tex  = cm_texel_from_dir(&r);
 
-    ( lookup_cm(&cm.cos_1  , &n)                               * ldotn
-    + lookup_cm(&cm.cos_8  , &r) * normalize_phong_lobe(8.0  )
-    + lookup_cm(&cm.cos_512, &r) * normalize_phong_lobe(512.0) * (1.0 - ldotn)
+    ( lookup_dir_cm  (&cm.cos_1  , &n)                                  * ldotn
+    + lookup_texel_cm(&cm.cos_8  , r_tex) * normalize_phong_lobe(8.0  )
+    + lookup_texel_cm(&cm.cos_512, r_tex) * normalize_phong_lobe(512.0) * (1.0 - ldotn)
     )
     * albedo * (*col * *col)
 }
 
 fn shader_cm_blue(p: &V3F, n: &V3F, col: &V3F, eye: &P3F, _tick: f64,
                   cm: &IrradianceCMSet) -> V3F {
-    let n     = fast_normalize(n);
-    let l     = fast_normalize(&(*eye.as_vec() - *p));
-    let ldotn = na::clamp(na::dot(&l, &n), 0.0, 1.0);
-    let eye   = *p - *eye.as_vec();
-    let r     = &reflect(&eye, &n);
+    let n      = fast_normalize(n);
+    let l      = fast_normalize(&(*eye.as_vec() - *p));
+    let ldotn  = na::clamp(na::dot(&l, &n), 0.0, 1.0);
+    let eye    = *p - *eye.as_vec();
+    let r      = reflect(&eye, &n);
+    let r_tex  = cm_texel_from_dir(&r);
 
-    ( lookup_cm(&cm.cos_1 ,  &n) * Vec3::new(0.2, 0.2, 0.8)    * ldotn
-    + lookup_cm(&cm.cos_64,  &r) * normalize_phong_lobe(64.0 ) * 0.75
-    + lookup_cm(&cm.cos_512, &r) * normalize_phong_lobe(512.0) * (1.0 - ldotn)
+    ( lookup_dir_cm  (&cm.cos_1  ,  &n)   * Vec3::new(0.2, 0.2, 0.8)    * ldotn
+    + lookup_texel_cm(&cm.cos_64 , r_tex) * normalize_phong_lobe(64.0 ) * 0.75
+    + lookup_texel_cm(&cm.cos_512, r_tex) * normalize_phong_lobe(512.0) * (1.0 - ldotn)
     )
     * (*col * *col)
 }
@@ -978,8 +986,8 @@ fn shader_cm_blinn_schlick(p: &V3F, n: &V3F, col: &V3F, eye: &P3F, _tick: f64,
     let w   = 1.0 - na::clamp(na::dot(&h, &eye), 0.0, 1.0);
     let w   = w * w;
 
-    (  lookup_cm(&cm.cos_1 , &n) * V3F::new(0.8, 0.65, 1.0) * w
-    + (lookup_cm(&cm.cos_64, &h) * normalize_phong_lobe(64.0) * (1.25 - w))
+    (  lookup_dir_cm(&cm.cos_1 , &n) * V3F::new(0.8, 0.65, 1.0) * w
+    + (lookup_dir_cm(&cm.cos_64, &h) * normalize_phong_lobe(64.0) * (1.25 - w))
     )
     * (*col * *col)
 }
@@ -1713,18 +1721,18 @@ pub extern fn rast_benchmark() {
 
     // Benchmark name, reference and function
     let benchmarks:[(&str, i64, &Fn() -> ()); 12] = [
-        ("KillerooV"  , 4689 , &|| rast_draw(0, RenderMode::Fill, 0 , 5, 0, 0, 0., w, h, fb_ptr)),
-        ("HeadV"      , 6973 , &|| rast_draw(0, RenderMode::Fill, 1 , 5, 0, 0, 0., w, h, fb_ptr)),
-        ("HandV"      , 2166 , &|| rast_draw(0, RenderMode::Fill, 4 , 5, 0, 0, 0., w, h, fb_ptr)),
-        ("TorusKnotV" , 4125 , &|| rast_draw(0, RenderMode::Fill, 6 , 5, 0, 0, 0., w, h, fb_ptr)),
-        ("CubeV"      , 3940 , &|| rast_draw(0, RenderMode::Fill, 9 , 5, 0, 0, 0., w, h, fb_ptr)),
-        ("CornellBoxV", 4651 , &|| rast_draw(0, RenderMode::Fill, 11, 5, 0, 0, 0., w, h, fb_ptr)),
-        ("KillerooP"  , 8129 , &|| rast_draw(1, RenderMode::Fill, 0 , 5, 0, 0, 0., w, h, fb_ptr)),
-        ("HeadP"      , 14714, &|| rast_draw(1, RenderMode::Fill, 1 , 5, 0, 0, 0., w, h, fb_ptr)),
-        ("HandP"      , 6398 , &|| rast_draw(1, RenderMode::Fill, 4 , 5, 0, 0, 0., w, h, fb_ptr)),
-        ("TorusKnotP" , 15801, &|| rast_draw(1, RenderMode::Fill, 6 , 5, 0, 0, 0., w, h, fb_ptr)),
-        ("CubeP"      , 17850, &|| rast_draw(1, RenderMode::Fill, 9 , 5, 0, 0, 0., w, h, fb_ptr)),
-        ("CornellBoxP", 20050, &|| rast_draw(1, RenderMode::Fill, 11, 5, 0, 0, 0., w, h, fb_ptr))
+        ("KillerooV"  , 4507 , &|| rast_draw(0, RenderMode::Fill, 0 , 5, 0, 0, 0., w, h, fb_ptr)),
+        ("HeadV"      , 6754 , &|| rast_draw(0, RenderMode::Fill, 1 , 5, 0, 0, 0., w, h, fb_ptr)),
+        ("HandV"      , 2142 , &|| rast_draw(0, RenderMode::Fill, 4 , 5, 0, 0, 0., w, h, fb_ptr)),
+        ("TorusKnotV" , 4124 , &|| rast_draw(0, RenderMode::Fill, 6 , 5, 0, 0, 0., w, h, fb_ptr)),
+        ("CubeV"      , 3974 , &|| rast_draw(0, RenderMode::Fill, 9 , 5, 0, 0, 0., w, h, fb_ptr)),
+        ("CornellBoxV", 4638 , &|| rast_draw(0, RenderMode::Fill, 11, 5, 0, 0, 0., w, h, fb_ptr)),
+        ("KillerooP"  , 7695 , &|| rast_draw(1, RenderMode::Fill, 0 , 5, 0, 0, 0., w, h, fb_ptr)),
+        ("HeadP"      , 13742, &|| rast_draw(1, RenderMode::Fill, 1 , 5, 0, 0, 0., w, h, fb_ptr)),
+        ("HandP"      , 6005 , &|| rast_draw(1, RenderMode::Fill, 4 , 5, 0, 0, 0., w, h, fb_ptr)),
+        ("TorusKnotP" , 14689, &|| rast_draw(1, RenderMode::Fill, 6 , 5, 0, 0, 0., w, h, fb_ptr)),
+        ("CubeP"      , 16355, &|| rast_draw(1, RenderMode::Fill, 9 , 5, 0, 0, 0., w, h, fb_ptr)),
+        ("CornellBoxP", 18075, &|| rast_draw(1, RenderMode::Fill, 11, 5, 0, 0, 0., w, h, fb_ptr))
     ];
 
     // Run once so all the one-time initialization etc. is done

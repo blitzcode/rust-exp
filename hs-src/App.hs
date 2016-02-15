@@ -95,6 +95,8 @@ draw = do
         GL.clearColor GL.$= (GL.Color4 1 0 1 1 :: GL.Color4 GL.GLclampf)
         GL.clear [GL.ColorBuffer, GL.DepthBuffer]
         GL.depthFunc GL.$= Just GL.Lequal
+        --GL.flush
+        --GL.finish
     -- Allow the experiment to draw into the framebuffer
     runExperimentState $ experimentDraw _aeFB _asCurTick
 

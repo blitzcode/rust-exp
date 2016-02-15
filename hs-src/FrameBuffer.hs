@@ -38,8 +38,10 @@ import Timing
 -- super sampling
 
 data FrameBuffer = FrameBuffer { fbTex         :: !GL.TextureObject
-                               , fbPBO         :: !GL.BufferObject
-                               , fbDim         :: IORef (Int, Int)
+                               , fbPBO1        :: !GL.BufferObject
+                               , fbPBO2        :: !GL.BufferObject
+                               , fbCurPBO      :: !(IORef Bool)
+                               , fbDim         :: !(IORef (Int, Int))
                                , fbFBO         :: !GL.FramebufferObject
                                , fbDownscaling :: !Downscaling
                                }
@@ -50,9 +52,12 @@ data Downscaling = HighQualityDownscaling | LowQualityDownscaling
 withFrameBuffer :: Int -> Int -> Downscaling -> (FrameBuffer -> IO a) -> IO a
 withFrameBuffer w h fbDownscaling f = do
     traceOnGLError $ Just "withFrameBuffer begin"
-    r <- bracket GL.genObjectName GL.deleteObjectName $ \fbTex ->
-         bracket GL.genObjectName GL.deleteObjectName $ \fbPBO ->
-         bracket GL.genObjectName GL.deleteObjectName $ \fbFBO -> do
+    r <- bracket GL.genObjectName GL.deleteObjectName $ \fbTex  ->
+         bracket GL.genObjectName GL.deleteObjectName $ \fbPBO1 ->
+         bracket GL.genObjectName GL.deleteObjectName $ \fbPBO2 ->
+         bracket GL.genObjectName GL.deleteObjectName $ \fbFBO  -> do
+             -- Keep track of current PBO
+             fbCurPBO <- newIORef False
              -- Setup texture
              GL.textureBinding GL.Texture2D GL.$= Just fbTex
              setTextureFiltering GL.Texture2D $
@@ -75,6 +80,19 @@ withFrameBuffer w h fbDownscaling f = do
     traceOnGLError $ Just "withFrameBuffer after cleanup"
     return r
 
+bindCurPBO, bindNextPBO :: FrameBuffer -> IO ()
+bindCurPBO  FrameBuffer { .. } =
+    (readIORef fbCurPBO >>= return . \case False -> fbPBO1; True -> fbPBO2) >>=
+        \pbo -> GL.bindBuffer GL.PixelUnpackBuffer GL.$= Just pbo
+bindNextPBO FrameBuffer { .. } =
+    (readIORef fbCurPBO >>= return . \case False -> fbPBO2; True -> fbPBO1) >>=
+        \pbo -> GL.bindBuffer GL.PixelUnpackBuffer GL.$= Just pbo
+--bindCurPBO  FrameBuffer { .. } = GL.bindBuffer GL.PixelUnpackBuffer GL.$= Just fbPBO1
+--bindNextPBO FrameBuffer { .. } = GL.bindBuffer GL.PixelUnpackBuffer GL.$= Just fbPBO1
+
+switchCurPBO :: FrameBuffer -> IO ()
+switchCurPBO FrameBuffer { .. } = modifyIORef' fbCurPBO not
+
 resizeFrameBuffer :: FrameBuffer -> Int -> Int -> IO ()
 resizeFrameBuffer fb w h = do
     -- Limit requested size by maximum available and store. This can lead to some
@@ -95,6 +113,21 @@ resizeFrameBuffer fb w h = do
                              , clampWH - hdiff
                              )
     writeIORef (fbDim fb) (clampHW, clampHH)
+    -- Initialize and clear both PBOs
+    black <- VSM.new (clampHW * clampHH) :: IO (VSM.IOVector Word32)
+    VSM.set black 0x00000000
+    VSM.unsafeWith black $ \ptrBlack -> do
+        bindCurPBO fb
+        GL.bufferData GL.PixelUnpackBuffer GL.$= ( fbSizeB w h   -- In bytes
+                                                 , ptrBlack      -- Black
+                                                 , GL.StreamDraw -- Dynamic
+                                                 )
+        bindNextPBO fb
+        GL.bufferData GL.PixelUnpackBuffer GL.$= ( fbSizeB w h   -- In bytes
+                                                 , ptrBlack      -- Black
+                                                 , GL.StreamDraw -- Dynamic
+                                                 )
+    GL.bindBuffer GL.PixelUnpackBuffer GL.$= Nothing
     -- Allocate texture and clear contents to black
     GL.textureBinding GL.Texture2D GL.$= Just (fbTex fb)
     texImage2DNullPtr clampHW clampHH
@@ -121,34 +154,42 @@ fillFrameBuffer fb@(FrameBuffer { .. }) f = do
       newForeignPtr_ nullPtr >>= \fpPBO ->
         run $ Just <$> f w h (VSM.unsafeFromForeignPtr0 fpPBO $ fbSizeB w h)
       -}
-      let bindPBO = GL.bindBuffer GL.PixelUnpackBuffer GL.$= Just fbPBO
-          -- Prevent stalls by just allocating new PBO storage every time
-       in bindPBO >> allocPBO fb >> GL.withMappedBuffer
-            GL.PixelUnpackBuffer
-            GL.WriteOnly
-            ( \ptrPBO -> newForeignPtr_ ptrPBO >>= \fpPBO ->
-                finally
-                  -- Run in outer base monad
-                  ( run $ Just <$> f w h (VSM.unsafeFromForeignPtr0 fpPBO $ fbSizeB w h) )
-                  bindPBO -- Make sure we rebind our PBO, otherwise
-                          -- unmapping might fail if the inner
-                          -- modified the bound buffer objects
-            )
-            ( \mf -> do traceS TLError $ "fillFrameBuffer - PBO mapping failure: " ++ show mf
-                        -- Looks like since the 1.0.0.0 change in monad-control we need
-                        -- some type annotations for this to work
-                        run $ (return Nothing :: m (Maybe a))
-            )
+       -- Prevent stalls by just allocating new PBO storage every time
+       bindNextPBO fb >> allocPBO fb >> GL.withMappedBuffer
+         GL.PixelUnpackBuffer
+         GL.WriteOnly
+         ( \ptrPBO -> newForeignPtr_ ptrPBO >>= \fpPBO ->
+             finally
+               -- Run in outer base monad
+               ( run $ Just <$> f w h (VSM.unsafeFromForeignPtr0 fpPBO $ fbSizeB w h) )
+               ( bindNextPBO fb ) -- Make sure we rebind our PBO, otherwise
+                                  -- unmapping might fail if the inner
+                                  -- modified the bound buffer objects
+         )
+         ( \mf -> do traceS TLError $ "fillFrameBuffer - PBO mapping failure: " ++ show mf
+                     -- Looks like since the 1.0.0.0 change in monad-control we need
+                     -- some type annotations for this to work
+                     run $ (return Nothing :: m (Maybe a))
+         )
     liftIO $ do
       -- Update frame buffer texture from the PBO data
+      bindCurPBO fb
       GL.textureBinding GL.Texture2D GL.$= Just fbTex
-      time <- fst <$> (timeIt $ texImage2DNullPtr w h)
+      --time <- fst <$> (timeIt $ texImage2DNullPtr w h)
       --traceS TLInfo $ printf "texImage2DNullPtr: %.2fms" (time * 1000)
+
+      GL.texSubImage2D GL.Texture2D
+                       0
+                       (GL.TexturePosition2D 0 0)
+                       (GL.TextureSize2D (fromIntegral w) (fromIntegral h))
+                       (GL.PixelData GL.RGBA GL.UnsignedByte nullPtr)
       when (fbDownscaling == HighQualityDownscaling) $
           GLR.glGenerateMipmap GLR.GL_TEXTURE_2D
       -- Done
       GL.bindBuffer GL.PixelUnpackBuffer GL.$= Nothing
       GL.textureBinding GL.Texture2D GL.$= Nothing
+      -- Swap our fill / upload PBOs for next time
+      switchCurPBO fb
     return r
 
 -- TODO: Could use immutable textures through glTexStorage + glTexSubImage

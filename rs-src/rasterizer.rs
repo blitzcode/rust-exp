@@ -1624,11 +1624,6 @@ macro_rules! mk_rasterizer {
         let e1c = x1 * y2 - y1 * x2 + e1add + 1;
         let e2c = x2 * y0 - y2 * x0 + e2add + 1;
 
-        // Starting value at AABB origin
-        let mut e0y = dy01 * (min_x << 4) + dx10 * (min_y << 4) + e0c;
-        let mut e1y = dy12 * (min_x << 4) + dx21 * (min_y << 4) + e1c;
-        let mut e2y = dy20 * (min_x << 4) + dx02 * (min_y << 4) + e2c;
-
         // Fixed-point edge deltas (another shift because each pixel step is
         // 1 << 4 steps for the edge function)
         let fp_dx10 = dx10 << 4; let fp_dy01 = dy01 << 4; let fp_dx21 = dx21 << 4;
@@ -1653,16 +1648,84 @@ macro_rules! mk_rasterizer {
         let c10 = c1 * inv_w_1 - c0 * inv_w_0;
         let c20 = c2 * inv_w_2 - c0 * inv_w_0;
 
-        for y in min_y..max_y {
+
+        static BLOCK_WDH: i32 = 4;
+
+        let mut accept = 0;
+        let mut reject = 0;
+
+        let mut by = min_y;
+        while by < max_y {
+
+            let mut bx = min_x;
+            while bx < max_x {
+                let bx0 = bx << 4;
+                let by0 = by << 4;
+                let bx1 = (bx + BLOCK_WDH - 1) << 4;
+                let by1 = (by + BLOCK_WDH - 1) << 4;
+
+                // hs0 = (x1 - x0) * (yf - y0) - (y1 - y0) * (xf - x0)
+                let block_a00 = (x1 - x0) * (by0 - y0) - (y1 - y0) * (bx0 - x0) < 0;
+                let block_a10 = (x1 - x0) * (by1 - y0) - (y1 - y0) * (bx0 - x0) < 0;
+                let block_a01 = (x1 - x0) * (by0 - y0) - (y1 - y0) * (bx1 - x0) < 0;
+                let block_a11 = (x1 - x0) * (by1 - y0) - (y1 - y0) * (bx1 - x0) < 0;
+                let a = block_a00 && block_a10 && block_a01 && block_a11;
+
+                if a {
+                    bx += BLOCK_WDH;
+                    reject += 1;
+                    continue;
+                }
+                // hs1 = (x2 - x1) * (yf - y1) - (y2 - y1) * (xf - x1)
+                let block_b00 = (x2 - x1) * (by0 - y1) - (y2 - y1) * (bx0 - x1) < 0;
+                let block_b10 = (x2 - x1) * (by1 - y1) - (y2 - y1) * (bx0 - x1) < 0;
+                let block_b01 = (x2 - x1) * (by0 - y1) - (y2 - y1) * (bx1 - x1) < 0;
+                let block_b11 = (x2 - x1) * (by1 - y1) - (y2 - y1) * (bx1 - x1) < 0;
+                let b = block_b00 && block_b10 && block_b01 && block_b11;
+
+                if b {
+                    bx += BLOCK_WDH;
+                    reject += 1;
+                    continue;
+                }
+                // hs2 = (x0 - x2) * (yf - y2) - (y0 - y2) * (xf - x2)
+                let block_c00 = (x0 - x2) * (by0 - y2) - (y0 - y2) * (bx0 - x2) < 0;
+                let block_c10 = (x0 - x2) * (by1 - y2) - (y0 - y2) * (bx0 - x2) < 0;
+                let block_c01 = (x0 - x2) * (by0 - y2) - (y0 - y2) * (bx1 - x2) < 0;
+                let block_c11 = (x0 - x2) * (by1 - y2) - (y0 - y2) * (bx1 - x2) < 0;
+                let c = block_c00 && block_c10 && block_c01 && block_c11;
+
+                if c {
+                    bx += BLOCK_WDH;
+                    reject += 1;
+                    continue;
+                }
+
+                accept += 1;
+
+        // Starting value at AABB origin
+        let mut e0y = dy01 * (bx << 4) + dx10 * (by << 4) + e0c;
+        let mut e1y = dy12 * (bx << 4) + dx21 * (by << 4) + e1c;
+        let mut e2y = dy20 * (bx << 4) + dx02 * (by << 4) + e2c;
+
+        let mut idx = bx + by * w;
+        for _ in 0..BLOCK_WDH {
             // Starting point for X stepping
             let mut e0x = e0y;
             let mut e1x = e1y;
             let mut e2x = e2y;
-
-            let idx_y = y * w;
             let mut inside = false;
 
-            for x in min_x..max_x {
+            for x in 0..BLOCK_WDH {
+
+                /*
+                let idx2 = (idx + x) as isize;
+                unsafe {
+                    * fb.offset(idx2) = 0x00000000;
+                }
+                continue;
+                */
+
                 // Check the half-space functions for all three edges to see if we're inside
                 // the triangle. These functions are basically just a cross product between an
                 // edge and a vector from the current raster position to the edge. The resulting
@@ -1684,7 +1747,7 @@ macro_rules! mk_rasterizer {
                     let b1 = (e1x - e1add - 1) as f32 * inv_tri_a2;
                     let b2 = (e2x - e2add - 1) as f32 * inv_tri_a2;
 
-                    let idx = (x + idx_y) as isize;
+                    let idx = (idx + x) as isize;
 
                     // Interpolate and test depth. Note that we are interpolating z/w, which
                     // is linear in screen space, no special perspective correct interpolation
@@ -1749,7 +1812,34 @@ macro_rules! mk_rasterizer {
             e0y += fp_dx10;
             e1y += fp_dx21;
             e2y += fp_dx02;
+            idx += w;
         }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                bx += BLOCK_WDH;
+            }
+            by += BLOCK_WDH;
+        }
+
+
+        //println!("accept {} /  reject {}", accept, reject);
+
+
+
     }
   };
 }

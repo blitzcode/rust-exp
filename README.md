@@ -3,7 +3,7 @@
 
 This project contains a number of experiments in the simulation / graphics category. I frequently write Haskell projects where I delegate the performance critical, numerical code to C/C++ or offload it to the GPU. I wanted to try using Rust for the performance critical parts as a safer and more functional alternative. Here we have a Haskell OpenGL application doing the display, user interaction, benchmarking and non-inner-loop parts with the actual computations done in a Rust library.
 
-![rust-exp](https://raw.github.com/blitzcode/rust-exp/master/experiments.png)
+![rust-exp](https://raw.github.com/blitzcode/rust-exp/master/screenshot.png)
 
 Experiments include...
 

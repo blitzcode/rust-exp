@@ -1634,6 +1634,25 @@ macro_rules! mk_rasterizer {
         let fp_dx10 = dx10 << 4; let fp_dy01 = dy01 << 4; let fp_dx21 = dx21 << 4;
         let fp_dy12 = dy12 << 4; let fp_dx02 = dx02 << 4; let fp_dy20 = dy20 << 4;
 
+        // During vertex processing we already replaced w with 1/w
+        let inv_w_0 = v0.w;
+        let inv_w_1 = v1.w;
+        let inv_w_2 = v2.w;
+
+        // Setup deltas for interpolating z, w and c with
+        //
+        // v0 + (v1 - v0) * b2 + (v2 - v0) * b0
+        //
+        // instead of
+        //
+        // v0 * b1 + v1 * b2 + v2 * b0
+        let z10 = v1.z - v0.z;
+        let z20 = v2.z - v0.z;
+        let w10 = inv_w_1 - inv_w_0;
+        let w20 = inv_w_2 - inv_w_0;
+        let c10 = c1 * inv_w_1 - c0 * inv_w_0;
+        let c20 = c2 * inv_w_2 - c0 * inv_w_0;
+
         for y in min_y..max_y {
             // Starting point for X stepping
             let mut e0x = e0y;
@@ -1670,30 +1689,29 @@ macro_rules! mk_rasterizer {
                     // Interpolate and test depth. Note that we are interpolating z/w, which
                     // is linear in screen space, no special perspective correct interpolation
                     // required. We also use a Z buffer, not a W buffer
-                    let z = v0.z * b1 + v1.z * b2 + v2.z * b0;
+                    let z = v0.z + z10 * b2 + z20 * b0;
                     let d = unsafe { depth_ptr.offset(idx) };
                     if unsafe { *d > z } {
                         // Write depth
                         unsafe { *d = z };
 
-                        // During vertex processing we already replaced w with 1/w
-                        let inv_w_0 = v0.w;
-                        let inv_w_1 = v1.w;
-                        let inv_w_2 = v2.w;
-
                         // To do perspective correct interpolation of attributes we need
                         // to know w at the current raster position. We can compute it by
                         // interpolating 1/w linearly and then taking the reciprocal
-                        let w_raster = 1.0 / (inv_w_0 * b1 + inv_w_1 * b2 + inv_w_2 * b0);
+                        let w_raster = 1.0 / (inv_w_0 + w10 * b2 + w20 * b0);
 
                         // Interpolate color. Perspective correct interpolation requires us to
                         // linearly interpolate col/w and then multiply by w
-                        let c_raster = (c0 * inv_w_0 * b1 +
-                                        c1 * inv_w_1 * b2 +
-                                        c2 * inv_w_2 * b0) * w_raster;
+                        let c_raster = (c0  * inv_w_0 +
+                                        c10 * b2      +
+                                        c20 * b0) * w_raster;
 
                         // Shading
                         let out = if $shade_per_pixel {
+                            // TODO: Also use faster 2xMAD form of barycentric interpolation for
+                            //       the p/n attributes, just a bit tricky to get the delta setup
+                            //       out of the per-vertex shading branch
+
                             // Also do perspective correct interpolation of the vertex normal
                             // and world space position, the shader might want these
                             let p_raster = (p0 * inv_w_0 * b1 +
@@ -1756,18 +1774,18 @@ pub extern fn rast_benchmark() {
 
     // Benchmark name, reference speed and function
     let benchmarks:[(&str, i64, &Fn() -> ()); 12] = [
-        ("KillerooV"  , 4507 , &|| rast_draw(0, RenderMode::Fill, 0 , 5, 0, 0, 0., w, h, fb_ptr)),
-        ("HeadV"      , 6754 , &|| rast_draw(0, RenderMode::Fill, 1 , 5, 0, 0, 0., w, h, fb_ptr)),
-        ("HandV"      , 2142 , &|| rast_draw(0, RenderMode::Fill, 4 , 5, 0, 0, 0., w, h, fb_ptr)),
-        ("TorusKnotV" , 4124 , &|| rast_draw(0, RenderMode::Fill, 6 , 5, 0, 0, 0., w, h, fb_ptr)),
-        ("CubeV"      , 3974 , &|| rast_draw(0, RenderMode::Fill, 9 , 5, 0, 0, 0., w, h, fb_ptr)),
-        ("CornellBoxV", 4638 , &|| rast_draw(0, RenderMode::Fill, 11, 5, 0, 0, 0., w, h, fb_ptr)),
-        ("KillerooP"  , 7695 , &|| rast_draw(1, RenderMode::Fill, 0 , 5, 0, 0, 0., w, h, fb_ptr)),
-        ("HeadP"      , 13742, &|| rast_draw(1, RenderMode::Fill, 1 , 5, 0, 0, 0., w, h, fb_ptr)),
-        ("HandP"      , 6005 , &|| rast_draw(1, RenderMode::Fill, 4 , 5, 0, 0, 0., w, h, fb_ptr)),
-        ("TorusKnotP" , 14689, &|| rast_draw(1, RenderMode::Fill, 6 , 5, 0, 0, 0., w, h, fb_ptr)),
-        ("CubeP"      , 16355, &|| rast_draw(1, RenderMode::Fill, 9 , 5, 0, 0, 0., w, h, fb_ptr)),
-        ("CornellBoxP", 18075, &|| rast_draw(1, RenderMode::Fill, 11, 5, 0, 0, 0., w, h, fb_ptr))
+        ("KillerooV"  , 4373 , &|| rast_draw(0, RenderMode::Fill, 0 , 5, 0, 0, 0., w, h, fb_ptr)),
+        ("HeadV"      , 6490 , &|| rast_draw(0, RenderMode::Fill, 1 , 5, 0, 0, 0., w, h, fb_ptr)),
+        ("HandV"      , 2036 , &|| rast_draw(0, RenderMode::Fill, 4 , 5, 0, 0, 0., w, h, fb_ptr)),
+        ("TorusKnotV" , 3842 , &|| rast_draw(0, RenderMode::Fill, 6 , 5, 0, 0, 0., w, h, fb_ptr)),
+        ("CubeV"      , 3680 , &|| rast_draw(0, RenderMode::Fill, 9 , 5, 0, 0, 0., w, h, fb_ptr)),
+        ("CornellBoxV", 4322 , &|| rast_draw(0, RenderMode::Fill, 11, 5, 0, 0, 0., w, h, fb_ptr)),
+        ("KillerooP"  , 7576 , &|| rast_draw(1, RenderMode::Fill, 0 , 5, 0, 0, 0., w, h, fb_ptr)),
+        ("HeadP"      , 13725, &|| rast_draw(1, RenderMode::Fill, 1 , 5, 0, 0, 0., w, h, fb_ptr)),
+        ("HandP"      , 5929 , &|| rast_draw(1, RenderMode::Fill, 4 , 5, 0, 0, 0., w, h, fb_ptr)),
+        ("TorusKnotP" , 14392, &|| rast_draw(1, RenderMode::Fill, 6 , 5, 0, 0, 0., w, h, fb_ptr)),
+        ("CubeP"      , 16225, &|| rast_draw(1, RenderMode::Fill, 9 , 5, 0, 0, 0., w, h, fb_ptr)),
+        ("CornellBoxP", 17835, &|| rast_draw(1, RenderMode::Fill, 11, 5, 0, 0, 0., w, h, fb_ptr))
     ];
 
     // Run once so all the one-time initialization etc. is done

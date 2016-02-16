@@ -38,7 +38,6 @@ data RustNBodyExperiment = RustNBodyExperiment
     }
 
 makeLenses ''RustNBodyExperiment
-
 instance Experiment RustNBodyExperiment where
     withExperiment f = do liftIO $ nbStableOrbits 10000 0.5 30.0
                           f $ RustNBodyExperiment { _rnbNumSteps   = 0
@@ -66,7 +65,7 @@ instance Experiment RustNBodyExperiment where
         let avgtime = fromMaybe 1 . median . BS.toList $ _rnbTimes
         np <- liftIO (fromIntegral <$> nbNumParticles :: IO Int)
         return $ printf ( "%i Steps, %.1fSPS/%.2fms | %s Bodies\n" ++
-                         "[QWE] Scene | Time Step [T][t]: %.4f | Theta [A][a]: %.2f | " ++
+                         "[QWE] Scene | Time Step [X][x]: %.4f | Theta [A][a]: %.2f | " ++
                          "Threads [P][p]: %i"
                         )
                         _rnbNumSteps
@@ -86,7 +85,7 @@ instance Experiment RustNBodyExperiment where
                     GLFW.Key'Q -> liftIO $ nbStableOrbits 10000 0.5 30.0
                     GLFW.Key'W -> liftIO $ nbRandomDisk   10000
                     GLFW.Key'E -> liftIO $ nbStableOrbits 5 5.0 40.0
-                    GLFW.Key'T | GLFW.modifierKeysShift mk -> rnbTimeStep //= 2
+                    GLFW.Key'X | GLFW.modifierKeysShift mk -> rnbTimeStep //= 2
                                | otherwise                 -> rnbTimeStep  *= 2
                     GLFW.Key'A | GLFW.modifierKeysShift mk ->
                                      rnbTheta %= max 0.0 . min 0.95 . (\x -> x - 0.05)

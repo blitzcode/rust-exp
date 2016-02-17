@@ -1595,6 +1595,215 @@ macro_rules! mk_rasterizer {
         let max_x = na::clamp(max_x, 0, w);
         let max_y = na::clamp(max_y, 0, h);
 
+
+
+
+        static BLOCK_WDH: i32 = 8;
+
+
+        if (max_x - min_x) * (max_y - min_y) < 32 * 32 {
+
+
+
+
+
+
+
+
+        // Implement bottom-left fill convention. Classifying those edges is simple, as with
+        // CCW vertex order they are either descending or horizontally moving left to right.
+        // We basically want to turn the '> 0' comparison into '>= 0', and we do this by adding
+        // a constant 1 for the half-space functions of those edges
+        let e0add = if dy01 > 0 || (dy01 == 0 && dx10 > 0) { 1 } else { 0 };
+        let e1add = if dy12 > 0 || (dy12 == 0 && dx21 > 0) { 1 } else { 0 };
+        let e2add = if dy20 > 0 || (dy20 == 0 && dx02 > 0) { 1 } else { 0 };
+
+        // We take the obvious formulation of the cross product edge functions
+        //
+        // hs0 = (x1 - x0) * (yf - y0) - (y1 - y0) * (xf - x0)
+        // hs1 = (x2 - x1) * (yf - y1) - (y2 - y1) * (xf - x1)
+        // hs2 = (x0 - x2) * (yf - y2) - (y0 - y2) * (xf - x2)
+        //
+        // and transform it into something more easily split based on its dependencies
+        //
+        // hs0 = (y0 - y1) * xf + (x1 - x0) * yf + (x0 * y1 - y0 * x1)
+        // hs1 = (y1 - y2) * xf + (x2 - x1) * yf + (x1 * y2 - y1 * x2)
+        // hs2 = (y2 - y0) * xf + (x0 - x2) * yf + (x2 * y0 - y2 * x0)
+        //
+        // Now we can separate the constant part and split the x/y dependent terms into an
+        // initial value and one to add for every step in each loop direction
+
+        // Edge function constant. The '+ 1' is so we can change the inside-edge compare in
+        // the inner loop from > to >=, meaning we can just OR the signs of the edge functions
+        let e0c = x0 * y1 - y0 * x1 + e0add + 1;
+        let e1c = x1 * y2 - y1 * x2 + e1add + 1;
+        let e2c = x2 * y0 - y2 * x0 + e2add + 1;
+
+        // Starting value at AABB origin
+        let mut e0y = dy01 * (min_x << 4) + dx10 * (min_y << 4) + e0c;
+        let mut e1y = dy12 * (min_x << 4) + dx21 * (min_y << 4) + e1c;
+        let mut e2y = dy20 * (min_x << 4) + dx02 * (min_y << 4) + e2c;
+
+        // Fixed-point edge deltas (another shift because each pixel step is
+        // 1 << 4 steps for the edge function)
+        let fp_dx10 = dx10 << 4; let fp_dy01 = dy01 << 4; let fp_dx21 = dx21 << 4;
+        let fp_dy12 = dy12 << 4; let fp_dx02 = dx02 << 4; let fp_dy20 = dy20 << 4;
+
+        // During vertex processing we already replaced w with 1/w
+        let inv_w_0 = v0.w;
+        let inv_w_1 = v1.w;
+        let inv_w_2 = v2.w;
+
+        // Setup deltas for interpolating z, w and c with
+        //
+        // v0 + (v1 - v0) * b2 + (v2 - v0) * b0
+        //
+        // instead of
+        //
+        // v0 * b1 + v1 * b2 + v2 * b0
+        let z10 = v1.z - v0.z;
+        let z20 = v2.z - v0.z;
+        let w10 = inv_w_1 - inv_w_0;
+        let w20 = inv_w_2 - inv_w_0;
+        let c10 = c1 * inv_w_1 - c0 * inv_w_0;
+        let c20 = c2 * inv_w_2 - c0 * inv_w_0;
+
+        for y in min_y..max_y {
+            // Starting point for X stepping
+            let mut e0x = e0y;
+            let mut e1x = e1y;
+            let mut e2x = e2y;
+
+            let idx_y = y * w;
+            let mut inside = false;
+
+            for x in min_x..max_x {
+                // Check the half-space functions for all three edges to see if we're inside
+                // the triangle. These functions are basically just a cross product between an
+                // edge and a vector from the current raster position to the edge. The resulting
+                // vector will either point into or out of the screen, so we can check which
+                // side of the edge we're on by the sign of the Z component. See notes for
+                // 'e[012]c' as for how we do the compare
+                if e0x | e1x | e2x >= 0 {
+                    inside = true;
+
+                    // The cross product from the edge function not only tells us which side
+                    // we're on, but also the area of parallelogram formed by the two vectors.
+                    // We're basically getting twice the area of one of the three triangles
+                    // splitting the original triangle around the raster position. Those are
+                    // already barycentric coordinates, we just need to normalize them with
+                    // the triangle area we already computed with the cross product for the
+                    // backface culling test. Don't forget to remove the fill convention
+                    // (e[012]add) and comparison (+1) bias applied earlier
+                    let b0 = (e0x - e0add - 1) as f32 * inv_tri_a2;
+                    let b1 = (e1x - e1add - 1) as f32 * inv_tri_a2;
+                    let b2 = (e2x - e2add - 1) as f32 * inv_tri_a2;
+
+                    let idx = (x + idx_y) as isize;
+
+                    // Interpolate and test depth. Note that we are interpolating z/w, which
+                    // is linear in screen space, no special perspective correct interpolation
+                    // required. We also use a Z buffer, not a W buffer
+                    let z = v0.z + z10 * b2 + z20 * b0;
+                    let d = unsafe { depth_ptr.offset(idx) };
+                    if unsafe { *d > z } {
+                        // Write depth
+                        unsafe { *d = z };
+
+                        // To do perspective correct interpolation of attributes we need
+                        // to know w at the current raster position. We can compute it by
+                        // interpolating 1/w linearly and then taking the reciprocal
+                        let w_raster = 1.0 / (inv_w_0 + w10 * b2 + w20 * b0);
+
+                        // Interpolate color. Perspective correct interpolation requires us to
+                        // linearly interpolate col/w and then multiply by w
+                        let c_raster = (c0  * inv_w_0 +
+                                        c10 * b2      +
+                                        c20 * b0) * w_raster;
+
+                        // Shading
+                        let out = if $shade_per_pixel {
+                            // TODO: Also use faster 2xMAD form of barycentric interpolation for
+                            //       the p/n attributes, just a bit tricky to get the delta setup
+                            //       out of the per-vertex shading branch
+
+                            // Also do perspective correct interpolation of the vertex normal
+                            // and world space position, the shader might want these
+                            let p_raster = (p0 * inv_w_0 * b1 +
+                                            p1 * inv_w_1 * b2 +
+                                            p2 * inv_w_2 * b0) * w_raster;
+                            let n_raster = (n0 * inv_w_0 * b1 +
+                                            n1 * inv_w_1 * b2 +
+                                            n2 * inv_w_2 * b0) * w_raster;
+
+                            // Call shader
+                            shader(&p_raster, &n_raster, &c_raster, &eye, tick, cm)
+                        } else {
+                            // Just write interpolated per-vertex shading result
+                            c_raster
+                        };
+
+                        // Gamma correct and write color
+                        unsafe {
+                            * fb.offset(idx) = rgbf_to_abgr32_gamma(out.x, out.y, out.z);
+                        }
+                    }
+                } else {
+                    // Very basic traversal optimization. Once we're inside the triangle, we can
+                    // stop with the current row if we find ourselves outside again
+                    if inside { break; }
+                }
+
+                // Step X
+                e0x += fp_dy01;
+                e1x += fp_dy12;
+                e2x += fp_dy20;
+            }
+
+            // Step Y
+            e0y += fp_dx10;
+            e1y += fp_dx21;
+            e2y += fp_dx02;
+        }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+        } else {
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
         // Implement bottom-left fill convention. Classifying those edges is simple, as with
         // CCW vertex order they are either descending or horizontally moving left to right.
         // We basically want to turn the '> 0' comparison into '>= 0', and we do this by adding
@@ -1649,8 +1858,6 @@ macro_rules! mk_rasterizer {
         let c20 = c2 * inv_w_2 - c0 * inv_w_0;
 
 
-        static BLOCK_WDH: i32 = 4;
-
         let mut accept = 0;
         let mut reject = 0;
 
@@ -1671,11 +1878,6 @@ macro_rules! mk_rasterizer {
                 let block_a11 = (x1 - x0) * (by1 - y0) - (y1 - y0) * (bx1 - x0) < 0;
                 let a = block_a00 && block_a10 && block_a01 && block_a11;
 
-                if a {
-                    bx += BLOCK_WDH;
-                    reject += 1;
-                    continue;
-                }
                 // hs1 = (x2 - x1) * (yf - y1) - (y2 - y1) * (xf - x1)
                 let block_b00 = (x2 - x1) * (by0 - y1) - (y2 - y1) * (bx0 - x1) < 0;
                 let block_b10 = (x2 - x1) * (by1 - y1) - (y2 - y1) * (bx0 - x1) < 0;
@@ -1683,11 +1885,6 @@ macro_rules! mk_rasterizer {
                 let block_b11 = (x2 - x1) * (by1 - y1) - (y2 - y1) * (bx1 - x1) < 0;
                 let b = block_b00 && block_b10 && block_b01 && block_b11;
 
-                if b {
-                    bx += BLOCK_WDH;
-                    reject += 1;
-                    continue;
-                }
                 // hs2 = (x0 - x2) * (yf - y2) - (y0 - y2) * (xf - x2)
                 let block_c00 = (x0 - x2) * (by0 - y2) - (y0 - y2) * (bx0 - x2) < 0;
                 let block_c10 = (x0 - x2) * (by1 - y2) - (y0 - y2) * (bx0 - x2) < 0;
@@ -1695,13 +1892,13 @@ macro_rules! mk_rasterizer {
                 let block_c11 = (x0 - x2) * (by1 - y2) - (y0 - y2) * (bx1 - x2) < 0;
                 let c = block_c00 && block_c10 && block_c01 && block_c11;
 
-                if c {
+                if a || b || c {
                     bx += BLOCK_WDH;
-                    reject += 1;
+                    //reject += 1;
                     continue;
                 }
 
-                accept += 1;
+                //accept += 1;
 
         // Starting value at AABB origin
         let mut e0y = dy01 * (bx << 4) + dx10 * (by << 4) + e0c;
@@ -1709,14 +1906,18 @@ macro_rules! mk_rasterizer {
         let mut e2y = dy20 * (bx << 4) + dx02 * (by << 4) + e2c;
 
         let mut idx = bx + by * w;
-        for _ in 0..BLOCK_WDH {
+
+        let clipped_block_wdh = cmp::min(bx + BLOCK_WDH, max_x) - bx;
+        let clipped_block_hgt = cmp::min(by + BLOCK_WDH, max_y) - by;
+
+        for _ in 0..clipped_block_hgt {
             // Starting point for X stepping
             let mut e0x = e0y;
             let mut e1x = e1y;
             let mut e2x = e2y;
             let mut inside = false;
 
-            for x in 0..BLOCK_WDH {
+            for x in 0..clipped_block_wdh {
 
                 /*
                 let idx2 = (idx + x) as isize;
@@ -1823,13 +2024,6 @@ macro_rules! mk_rasterizer {
 
 
 
-
-
-
-
-
-
-
                 bx += BLOCK_WDH;
             }
             by += BLOCK_WDH;
@@ -1838,6 +2032,9 @@ macro_rules! mk_rasterizer {
 
         //println!("accept {} /  reject {}", accept, reject);
 
+
+
+        }
 
 
     }

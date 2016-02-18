@@ -357,7 +357,7 @@ pub extern fn rast_get_mesh_tri_cnt(idx: i32) -> i32 { mesh_by_idx(idx).2.tri.le
 
 fn mesh_by_idx<'a>(idx: i32) -> (&'a str, CameraFromTime, &'a Mesh) {
     // Retrieve mesh name, camera and geometry by its index. We do this in such an awkward
-    // way so we can take advantage of the on-demand loading of the cube maps through
+    // way so we can take advantage of the on-demand loading of the meshes through
     // lazy_static
 
     // Mesh geometry
@@ -483,6 +483,8 @@ static CM_FACE_WDH: i32 = 64;
 #[derive(PartialEq, Debug, Copy, Clone)]
 enum CMFaceName { XPos, XNeg, YPos, YNeg, ZPos, ZNeg }
 
+// TODO: We could store the different convolution cube maps interleaved,
+//       increasing cache usage for lookups using multiple powers
 type CMFace = Vec<V3F>;
 type CM     = [CMFace; 6];
 
@@ -1532,6 +1534,8 @@ macro_rules! mk_rasterizer {
                      h: i32,
                      fb: *mut u32,
                      depth_ptr: *mut f32) {
+        // TODO: This code would really benefit from SIMD intrinsics
+
         // Break out positions (viewport and world), colors and normals
         let v0 = vtx0.vp; let p0 = vtx0.world; let c0 = vtx0.col; let n0 = vtx0.n;
         let v1 = vtx1.vp; let p1 = vtx1.world; let c1 = vtx1.col; let n1 = vtx1.n;
@@ -1655,6 +1659,9 @@ macro_rules! mk_rasterizer {
 
         for y in min_y..max_y {
             // Starting point for X stepping
+            //
+            // TODO: We could move the starting point to the intersection with the left edges,
+            //       turning this a bit into a scanline rasterizer
             let mut e0x = e0y;
             let mut e1x = e1y;
             let mut e2x = e2y;
@@ -1722,6 +1729,9 @@ macro_rules! mk_rasterizer {
                                             n2 * inv_w_2 * b0) * w_raster;
 
                             // Call shader
+                            //
+                            // TODO: We could just generate one rasterizer instance for each shader
+                            //       or alternatively switch to a deferred shading approach
                             shader(&p_raster, &n_raster, &c_raster, &eye, tick, cm)
                         } else {
                             // Just write interpolated per-vertex shading result
@@ -1884,6 +1894,8 @@ pub extern fn rast_draw(shade_per_pixel: i32,
                         h: i32,
                         fb: *mut u32) {
     // Transform, rasterize and shade mesh
+
+    // TODO: Parallelize everything
 
     // Avoid passing a bool over the FFI, convert now
     let shade_per_pixel: bool = shade_per_pixel != 0;

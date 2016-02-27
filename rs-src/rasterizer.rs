@@ -65,7 +65,6 @@ fn reflect(i: &V3F, n: &V3F) -> V3F {
 // -------------------------
 //
 
-#[derive(Clone, Copy)]
 struct Vertex {
     p:   P3F,
     n:   V3F,
@@ -85,7 +84,6 @@ impl Vertex {
 }
 
 // Indexed triangle representation
-#[derive(Clone, Copy)]
 struct Triangle {
     v0: u32,
     v1: u32,
@@ -1168,7 +1166,6 @@ fn shader_by_idx<'a>(idx: i32) -> (&'a str, bool, Shader) {
 // ----------------------------------
 //
 
-#[derive(Clone, Copy)]
 struct TransformedVertex {
     vp:    Pnt4<f32>, // Projected, perspective divided, viewport transformed vertex with W
                       // (note that we actually store 1/W in the last component)

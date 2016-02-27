@@ -1786,18 +1786,18 @@ pub extern fn rast_benchmark() {
 
     // Benchmark name, reference speed and function
     let benchmarks:[(&str, i64, &Fn() -> ()); 12] = [
-        ("KillerooV"  , 3491 , &|| rast_draw(0, RenderMode::Fill, 0 , 5, 0, 0, 0., w, h, fb_ptr)),
-        ("HeadV"      , 5512 , &|| rast_draw(0, RenderMode::Fill, 1 , 5, 0, 0, 0., w, h, fb_ptr)),
-        ("HandV"      , 2031 , &|| rast_draw(0, RenderMode::Fill, 4 , 5, 0, 0, 0., w, h, fb_ptr)),
-        ("TorusKnotV" , 3917 , &|| rast_draw(0, RenderMode::Fill, 6 , 5, 0, 0, 0., w, h, fb_ptr)),
-        ("CubeV"      , 3718 , &|| rast_draw(0, RenderMode::Fill, 9 , 5, 0, 0, 0., w, h, fb_ptr)),
-        ("CornellBoxV", 4416 , &|| rast_draw(0, RenderMode::Fill, 11, 5, 0, 0, 0., w, h, fb_ptr)),
-        ("KillerooP"  , 7670 , &|| rast_draw(1, RenderMode::Fill, 0 , 5, 0, 0, 0., w, h, fb_ptr)),
-        ("HeadP"      , 13746, &|| rast_draw(1, RenderMode::Fill, 1 , 5, 0, 0, 0., w, h, fb_ptr)),
-        ("HandP"      , 6000 , &|| rast_draw(1, RenderMode::Fill, 4 , 5, 0, 0, 0., w, h, fb_ptr)),
-        ("TorusKnotP" , 14510, &|| rast_draw(1, RenderMode::Fill, 6 , 5, 0, 0, 0., w, h, fb_ptr)),
-        ("CubeP"      , 16354, &|| rast_draw(1, RenderMode::Fill, 9 , 5, 0, 0, 0., w, h, fb_ptr)),
-        ("CornellBoxP", 17773, &|| rast_draw(1, RenderMode::Fill, 11, 5, 0, 0, 0., w, h, fb_ptr))
+        ("KillerooV"  , 2391, &|| rast_draw(0, RenderMode::Fill, 0 , 5, 0, 0, 0., w, h, fb_ptr)),
+        ("HeadV"      , 2747, &|| rast_draw(0, RenderMode::Fill, 1 , 5, 0, 0, 0., w, h, fb_ptr)),
+        ("HandV"      ,  989, &|| rast_draw(0, RenderMode::Fill, 4 , 5, 0, 0, 0., w, h, fb_ptr)),
+        ("TorusKnotV" , 1407, &|| rast_draw(0, RenderMode::Fill, 6 , 5, 0, 0, 0., w, h, fb_ptr)),
+        ("CubeV"      , 1232, &|| rast_draw(0, RenderMode::Fill, 9 , 5, 0, 0, 0., w, h, fb_ptr)),
+        ("CornellBoxV", 1614, &|| rast_draw(0, RenderMode::Fill, 11, 5, 0, 0, 0., w, h, fb_ptr)),
+        ("KillerooP"  , 4235, &|| rast_draw(1, RenderMode::Fill, 0 , 5, 0, 0, 0., w, h, fb_ptr)),
+        ("HeadP"      , 5283, &|| rast_draw(1, RenderMode::Fill, 1 , 5, 0, 0, 0., w, h, fb_ptr)),
+        ("HandP"      , 2411, &|| rast_draw(1, RenderMode::Fill, 4 , 5, 0, 0, 0., w, h, fb_ptr)),
+        ("TorusKnotP" , 4259, &|| rast_draw(1, RenderMode::Fill, 6 , 5, 0, 0, 0., w, h, fb_ptr)),
+        ("CubeP"      , 4551, &|| rast_draw(1, RenderMode::Fill, 9 , 5, 0, 0, 0., w, h, fb_ptr)),
+        ("CornellBoxP", 5668, &|| rast_draw(1, RenderMode::Fill, 11, 5, 0, 0, 0., w, h, fb_ptr))
     ];
 
     // Run once so all the one-time initialization etc. is done
@@ -1973,13 +1973,14 @@ pub extern fn rast_draw(shade_per_pixel: i32,
         }
     }
 
-    // Need to be able to send our framebuffer pointer across thread boundaries
+    // Need to be able to send our buffer pointers across thread boundaries
     #[derive(Copy, Clone)]
-    struct SendFB {
-        ptr: *mut u32
+    struct SendBufPtr<T> {
+        ptr: *mut T
     }
-    unsafe impl Send for SendFB { }
-    let send_fb = SendFB { ptr: fb };
+    unsafe impl Send for SendBufPtr<u32> { }
+    unsafe impl Send for SendBufPtr<f32> { }
+    let send_fb = SendBufPtr { ptr: fb };
 
     // Draw
     match mode {
@@ -2024,28 +2025,44 @@ pub extern fn rast_draw(shade_per_pixel: i32,
             // Allocate and clear depth buffer
             let mut depth: Vec<f32> = Vec::new();
             depth.resize((w * h) as usize, 1.0);
-            let depth_ptr = depth.as_mut_ptr();
+            let send_depth = SendBufPtr { ptr: depth.as_mut_ptr() };
 
-            for t in &mesh.tri {
-                // Triangle vertices
-                let vtx0 = unsafe { vtx_transf.get_unchecked(t.v0 as usize) };
-                let vtx1 = unsafe { vtx_transf.get_unchecked(t.v1 as usize) };
-                let vtx2 = unsafe { vtx_transf.get_unchecked(t.v2 as usize) };
+            pool.scoped(|scoped| {
+                let vtx: &Vec<TransformedVertex> = &vtx_transf;
 
-                if shade_per_pixel {
-                    rasterize_and_shade_triangle_pixel(
-                        vtx0, vtx1, vtx2,
-                        &shader, &eye, tick, cm,
-                        0, 0, w, h,
-                        w, fb, depth_ptr);
-                } else {
-                    rasterize_and_shade_triangle_vertex(
-                        vtx0, vtx1, vtx2,
-                        &shader, &eye, tick, cm,
-                        0, 0, w, h,
-                        w, fb, depth_ptr);
+                // Very basic parallel implementation. Split image into quadrants, draw all
+                // triangles in each quadrant
+                let quadrants = [
+                    (0, 0, w / 2, h / 2),
+                    (w / 2, 0, w, h / 2),
+                    (0, h / 2, w / 2, h),
+                    (w / 2, h / 2, w, h)
+                ];
+                for &(tx1, ty1, tx2, ty2) in &quadrants {
+                    scoped.execute(move || {
+                        for t in &mesh.tri {
+                            // Triangle vertices
+                            let vtx0 = unsafe { vtx.get_unchecked(t.v0 as usize) };
+                            let vtx1 = unsafe { vtx.get_unchecked(t.v1 as usize) };
+                            let vtx2 = unsafe { vtx.get_unchecked(t.v2 as usize) };
+
+                            if shade_per_pixel {
+                                rasterize_and_shade_triangle_pixel(
+                                    vtx0, vtx1, vtx2,
+                                    &shader, &eye, tick, cm,
+                                    tx1, ty1, tx2, ty2,
+                                    w, send_fb.ptr, send_depth.ptr);
+                            } else {
+                                rasterize_and_shade_triangle_vertex(
+                                    vtx0, vtx1, vtx2,
+                                    &shader, &eye, tick, cm,
+                                    tx1, ty1, tx2, ty2,
+                                    w, send_fb.ptr, send_depth.ptr);
+                            }
+                        }
+                    });
                 }
-            }
+            });
         }
     }
 

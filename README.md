@@ -7,7 +7,7 @@ This project contains a number of experiments in the simulation / graphics categ
 
 Experiments include...
 
-- **Software rasterizer** using half-space functions, doing perspective and sub-pixel correct, gap-less rasterization, depth buffering, switchable between vertex and pixel shading, many different shaders implemented, does IBL based on pre-filtered irradiance cubemaps, different environments included, a selection of scenes, many with baked ambient occlusion or radiosity, build-in benchmarking, gamma corrected output, selectable backgrounds
+- **Software rasterizer** using half-space functions, doing perspective and sub-pixel correct, gap-less rasterization, depth buffering, switchable between vertex and pixel shading, many different shaders implemented, does IBL based on pre-filtered irradiance cubemaps, different environments included, a selection of scenes, many with baked ambient occlusion or radiosity, build-in benchmarking, gamma corrected output, selectable backgrounds, parallelized
 - Gravitational **N-Body simulation**, both a brute force O(N^2) and the O(n log n) Barnes-Hut algorithm are implemented, adjustable time step and cutoff criteria, rendering of alpha blended particles with tails, parallelized, multiple interesting initial configurations to choose from
 - The famous **'Game of Life' cellular automata**, optimized and parallelized implementation, library of recallable patterns
 

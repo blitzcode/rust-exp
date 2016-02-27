@@ -1782,18 +1782,18 @@ pub extern fn rast_benchmark() {
 
     // Benchmark name, reference speed and function
     let benchmarks:[(&str, i64, &Fn() -> ()); 12] = [
-        ("KillerooV"  , 4373 , &|| rast_draw(0, RenderMode::Fill, 0 , 5, 0, 0, 0., w, h, fb_ptr)),
-        ("HeadV"      , 6490 , &|| rast_draw(0, RenderMode::Fill, 1 , 5, 0, 0, 0., w, h, fb_ptr)),
-        ("HandV"      , 2036 , &|| rast_draw(0, RenderMode::Fill, 4 , 5, 0, 0, 0., w, h, fb_ptr)),
-        ("TorusKnotV" , 3842 , &|| rast_draw(0, RenderMode::Fill, 6 , 5, 0, 0, 0., w, h, fb_ptr)),
-        ("CubeV"      , 3680 , &|| rast_draw(0, RenderMode::Fill, 9 , 5, 0, 0, 0., w, h, fb_ptr)),
-        ("CornellBoxV", 4322 , &|| rast_draw(0, RenderMode::Fill, 11, 5, 0, 0, 0., w, h, fb_ptr)),
-        ("KillerooP"  , 7576 , &|| rast_draw(1, RenderMode::Fill, 0 , 5, 0, 0, 0., w, h, fb_ptr)),
-        ("HeadP"      , 13725, &|| rast_draw(1, RenderMode::Fill, 1 , 5, 0, 0, 0., w, h, fb_ptr)),
-        ("HandP"      , 5929 , &|| rast_draw(1, RenderMode::Fill, 4 , 5, 0, 0, 0., w, h, fb_ptr)),
-        ("TorusKnotP" , 14392, &|| rast_draw(1, RenderMode::Fill, 6 , 5, 0, 0, 0., w, h, fb_ptr)),
-        ("CubeP"      , 16225, &|| rast_draw(1, RenderMode::Fill, 9 , 5, 0, 0, 0., w, h, fb_ptr)),
-        ("CornellBoxP", 17835, &|| rast_draw(1, RenderMode::Fill, 11, 5, 0, 0, 0., w, h, fb_ptr))
+        ("KillerooV"  , 3491 , &|| rast_draw(0, RenderMode::Fill, 0 , 5, 0, 0, 0., w, h, fb_ptr)),
+        ("HeadV"      , 5512 , &|| rast_draw(0, RenderMode::Fill, 1 , 5, 0, 0, 0., w, h, fb_ptr)),
+        ("HandV"      , 2031 , &|| rast_draw(0, RenderMode::Fill, 4 , 5, 0, 0, 0., w, h, fb_ptr)),
+        ("TorusKnotV" , 3917 , &|| rast_draw(0, RenderMode::Fill, 6 , 5, 0, 0, 0., w, h, fb_ptr)),
+        ("CubeV"      , 3718 , &|| rast_draw(0, RenderMode::Fill, 9 , 5, 0, 0, 0., w, h, fb_ptr)),
+        ("CornellBoxV", 4416 , &|| rast_draw(0, RenderMode::Fill, 11, 5, 0, 0, 0., w, h, fb_ptr)),
+        ("KillerooP"  , 7670 , &|| rast_draw(1, RenderMode::Fill, 0 , 5, 0, 0, 0., w, h, fb_ptr)),
+        ("HeadP"      , 13746, &|| rast_draw(1, RenderMode::Fill, 1 , 5, 0, 0, 0., w, h, fb_ptr)),
+        ("HandP"      , 6000 , &|| rast_draw(1, RenderMode::Fill, 4 , 5, 0, 0, 0., w, h, fb_ptr)),
+        ("TorusKnotP" , 14510, &|| rast_draw(1, RenderMode::Fill, 6 , 5, 0, 0, 0., w, h, fb_ptr)),
+        ("CubeP"      , 16354, &|| rast_draw(1, RenderMode::Fill, 9 , 5, 0, 0, 0., w, h, fb_ptr)),
+        ("CornellBoxP", 17773, &|| rast_draw(1, RenderMode::Fill, 11, 5, 0, 0, 0., w, h, fb_ptr))
     ];
 
     // Run once so all the one-time initialization etc. is done
@@ -1932,18 +1932,17 @@ pub extern fn rast_draw(shade_per_pixel: i32,
     let mut vtx_transf: Vec<TransformedVertex> = Vec::with_capacity(mesh.vtx.len());
     unsafe { vtx_transf.set_len(mesh.vtx.len()); }
 
-    // Transform and shade vertices. Only pick parallel processing if we actually have a
-    // significant number of vertices and also do per-vertex shading
+    // Transform and shade vertices. Only pick parallel processing if we
+    // actually have a significant vertex processing workload
     let do_vtx_shading = !shade_per_pixel && mode == RenderMode::Fill;
-    if mesh.vtx.len() > 10000 && do_vtx_shading {
+    let ndim           = mesh.normalize_dimensions();
+    if mesh.vtx.len() > 10000 || (do_vtx_shading && mesh.vtx.len() > 2500) {
         // Parallel processing
 
         // Chunked iterators for both vertex input and output
         let vtx_chunk_size    = cmp::max(mesh.vtx.len() / *NUM_THREADS, 512);
         let vtx_transf_chunks = vtx_transf.chunks_mut(vtx_chunk_size);
         let vtx_mesh_chunks   = mesh.vtx.chunks(vtx_chunk_size);
-
-        let ndim = mesh.normalize_dimensions();
 
         // Process chunks in parallel
         pool.scoped(|scoped| {
@@ -1962,7 +1961,7 @@ pub extern fn rast_draw(shade_per_pixel: i32,
         // Serial processing
 
         transform_vertices
-            (&mesh.vtx[..], &mut vtx_transf[..], &mesh.normalize_dimensions(), w, h, &eye);
+            (&mesh.vtx[..], &mut vtx_transf[..], &ndim, w, h, &eye);
         if do_vtx_shading {
             for vtx in &mut vtx_transf {
                 vtx.col = shader(&vtx.world, &vtx.n, &vtx.col, &eye, tick, cm);
@@ -1970,7 +1969,7 @@ pub extern fn rast_draw(shade_per_pixel: i32,
         }
     }
 
-    // Need to be able to send out framebuffer pointer across thread boundaries
+    // Need to be able to send our framebuffer pointer across thread boundaries
     #[derive(Copy, Clone)]
     struct SendFB {
         ptr: *mut u32
@@ -2001,7 +2000,7 @@ pub extern fn rast_draw(shade_per_pixel: i32,
             // Line drawing can be done in parallel
             pool.scoped(|scoped| {
                 let vtx: &Vec<TransformedVertex> = &vtx_transf;
-                for chunk in mesh.tri.chunks(mesh.tri.len() / *NUM_THREADS) {
+                for chunk in mesh.tri.chunks(cmp::max(mesh.tri.len() / *NUM_THREADS, 512)) {
                     scoped.execute(move || {
                         for t in chunk {
                             for &(idx1, idx2) in &[(t.v0, t.v1), (t.v1, t.v2), (t.v2, t.v0)] {

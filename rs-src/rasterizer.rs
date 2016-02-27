@@ -1940,7 +1940,7 @@ pub extern fn rast_draw(shade_per_pixel: i32,
     // actually have a significant vertex processing workload
     let do_vtx_shading = !shade_per_pixel && mode == RenderMode::Fill;
     let ndim           = mesh.normalize_dimensions();
-    if mesh.vtx.len() > 10000 || (do_vtx_shading && mesh.vtx.len() > 2500) {
+    if *NUM_THREADS > 1 && (mesh.vtx.len() > 10000 || (do_vtx_shading && mesh.vtx.len() > 2500)) {
         // Parallel processing
 
         // Chunked iterators for both vertex input and output
@@ -2027,42 +2027,65 @@ pub extern fn rast_draw(shade_per_pixel: i32,
             depth.resize((w * h) as usize, 1.0);
             let send_depth = SendBufPtr { ptr: depth.as_mut_ptr() };
 
-            pool.scoped(|scoped| {
-                let vtx: &Vec<TransformedVertex> = &vtx_transf;
+            if *NUM_THREADS == 1 {
+                // Serial implementation
+                for t in &mesh.tri {
+                    // Triangle vertices
+                    let vtx0 = unsafe { vtx_transf.get_unchecked(t.v0 as usize) };
+                    let vtx1 = unsafe { vtx_transf.get_unchecked(t.v1 as usize) };
+                    let vtx2 = unsafe { vtx_transf.get_unchecked(t.v2 as usize) };
 
-                // Very basic parallel implementation. Split image into quadrants, draw all
-                // triangles in each quadrant
-                let quadrants = [
-                    (0, 0, w / 2, h / 2),
-                    (w / 2, 0, w, h / 2),
-                    (0, h / 2, w / 2, h),
-                    (w / 2, h / 2, w, h)
-                ];
-                for &(tx1, ty1, tx2, ty2) in &quadrants {
-                    scoped.execute(move || {
-                        for t in &mesh.tri {
-                            // Triangle vertices
-                            let vtx0 = unsafe { vtx.get_unchecked(t.v0 as usize) };
-                            let vtx1 = unsafe { vtx.get_unchecked(t.v1 as usize) };
-                            let vtx2 = unsafe { vtx.get_unchecked(t.v2 as usize) };
-
-                            if shade_per_pixel {
-                                rasterize_and_shade_triangle_pixel(
-                                    vtx0, vtx1, vtx2,
-                                    &shader, &eye, tick, cm,
-                                    tx1, ty1, tx2, ty2,
-                                    w, send_fb.ptr, send_depth.ptr);
-                            } else {
-                                rasterize_and_shade_triangle_vertex(
-                                    vtx0, vtx1, vtx2,
-                                    &shader, &eye, tick, cm,
-                                    tx1, ty1, tx2, ty2,
-                                    w, send_fb.ptr, send_depth.ptr);
-                            }
-                        }
-                    });
+                    if shade_per_pixel {
+                        rasterize_and_shade_triangle_pixel(
+                            vtx0, vtx1, vtx2,
+                            &shader, &eye, tick, cm,
+                            0, 0, w, h,
+                            w, send_fb.ptr, send_depth.ptr);
+                    } else {
+                        rasterize_and_shade_triangle_vertex(
+                            vtx0, vtx1, vtx2,
+                            &shader, &eye, tick, cm,
+                            0, 0, w, h,
+                            w, send_fb.ptr, send_depth.ptr);
+                    }
                 }
-            });
+            } else  {
+                pool.scoped(|scoped| {
+                    // Very basic parallel implementation. Split image into quadrants, draw all
+                    // triangles in each quadrant
+                    let quadrants = [
+                        (0, 0, w / 2, h / 2),
+                        (w / 2, 0, w, h / 2),
+                        (0, h / 2, w / 2, h),
+                        (w / 2, h / 2, w, h)
+                    ];
+                    let vtx: &Vec<TransformedVertex> = &vtx_transf;
+                    for &(tx1, ty1, tx2, ty2) in &quadrants {
+                        scoped.execute(move || {
+                            for t in &mesh.tri {
+                                // Triangle vertices
+                                let vtx0 = unsafe { vtx.get_unchecked(t.v0 as usize) };
+                                let vtx1 = unsafe { vtx.get_unchecked(t.v1 as usize) };
+                                let vtx2 = unsafe { vtx.get_unchecked(t.v2 as usize) };
+
+                                if shade_per_pixel {
+                                    rasterize_and_shade_triangle_pixel(
+                                        vtx0, vtx1, vtx2,
+                                        &shader, &eye, tick, cm,
+                                        tx1, ty1, tx2, ty2,
+                                        w, send_fb.ptr, send_depth.ptr);
+                                } else {
+                                    rasterize_and_shade_triangle_vertex(
+                                        vtx0, vtx1, vtx2,
+                                        &shader, &eye, tick, cm,
+                                        tx1, ty1, tx2, ty2,
+                                        w, send_fb.ptr, send_depth.ptr);
+                                }
+                            }
+                        });
+                    }
+                });
+            }
         }
     }
 

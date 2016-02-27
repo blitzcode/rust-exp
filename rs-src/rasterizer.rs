@@ -1948,6 +1948,14 @@ pub extern fn rast_draw(shade_per_pixel: i32,
         });
     }
 
+    // Need to be able to send out framebuffer pointer across thread boundaries
+    #[derive(Copy, Clone)]
+    struct SendFB {
+        ptr: *mut u32
+    }
+    unsafe impl Send for SendFB { }
+    let send_fb = SendFB { ptr: fb };
+
     // Draw
     match mode {
         RenderMode::Point => {
@@ -1968,14 +1976,21 @@ pub extern fn rast_draw(shade_per_pixel: i32,
         }
 
         RenderMode::Line => {
-            for t in &mesh.tri {
-                for &(idx1, idx2) in &[(t.v0, t.v1), (t.v1, t.v2), (t.v2, t.v0)] {
-                    let vp1 = &vtx_transf[idx1 as usize].vp;
-                    let vp2 = &vtx_transf[idx2 as usize].vp;
-
-                    draw_line(vp1.x, vp1.y, vp2.x, vp2.y, fb, w, h);
+            // Line drawing can be done in parallel
+            pool.scoped(|scoped| {
+                let vtx: &Vec<TransformedVertex> = &vtx_transf;
+                for chunk in mesh.tri.chunks(4096) {
+                    scoped.execute(move || {
+                        for t in chunk {
+                            for &(idx1, idx2) in &[(t.v0, t.v1), (t.v1, t.v2), (t.v2, t.v0)] {
+                                let vp1 = &vtx[idx1 as usize].vp;
+                                let vp2 = &vtx[idx2 as usize].vp;
+                                draw_line(vp1.x, vp1.y, vp2.x, vp2.y, send_fb.ptr, w, h);
+                            }
+                        }
+                    });
                 }
-            }
+            });
         }
 
         RenderMode::Fill => {

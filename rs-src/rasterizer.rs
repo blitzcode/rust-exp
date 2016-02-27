@@ -15,6 +15,7 @@ use std::cmp;
 use ansi_term;
 use scoped_threadpool;
 use std::cell::UnsafeCell;
+use num_cpus;
 
 //
 // ------------------------------------------
@@ -1904,6 +1905,16 @@ pub extern fn rast_draw(shade_per_pixel: i32,
     let (_, cm)              = cm_set_by_idx(env_map_idx);
     draw_bg_gradient(bg_idx, w, h, fb);
 
+    // Number of threads we're supposed to use
+    lazy_static! {
+        static ref NUM_THREADS: usize = {
+            let num_threads = num_cpus::get();
+            // Assume that if we have 1 or 2 threads our machine does not use HT,
+            // otherwise divide by two to get the number of physical cores
+            if num_threads > 2 { num_threads / 2 } else { num_threads }
+        };
+    }
+
     // Reusable thread pool
     struct SyncPool {
         cell: UnsafeCell<scoped_threadpool::Pool>
@@ -1911,7 +1922,7 @@ pub extern fn rast_draw(shade_per_pixel: i32,
     unsafe impl Sync for SyncPool { }
     lazy_static! {
         static ref POOL: SyncPool = {
-            let pool = scoped_threadpool::Pool::new(4);
+            let pool = scoped_threadpool::Pool::new(*NUM_THREADS as u32);
             SyncPool { cell: UnsafeCell::new(pool) }
         };
     }
@@ -1924,7 +1935,7 @@ pub extern fn rast_draw(shade_per_pixel: i32,
     // Transform and shade vertices in parallel
     {
         // Chunked iterators for both vertex input and output
-        let vtx_chunk_size    = cmp::max(mesh.vtx.len() / 8, 512);
+        let vtx_chunk_size    = cmp::max(mesh.vtx.len() / *NUM_THREADS, 512);
         let vtx_transf_chunks = vtx_transf.chunks_mut(vtx_chunk_size);
         let vtx_mesh_chunks   = mesh.vtx.chunks(vtx_chunk_size);
 
@@ -1979,7 +1990,7 @@ pub extern fn rast_draw(shade_per_pixel: i32,
             // Line drawing can be done in parallel
             pool.scoped(|scoped| {
                 let vtx: &Vec<TransformedVertex> = &vtx_transf;
-                for chunk in mesh.tri.chunks(4096) {
+                for chunk in mesh.tri.chunks(mesh.tri.len() / *NUM_THREADS) {
                     scoped.execute(move || {
                         for t in chunk {
                             for &(idx1, idx2) in &[(t.v0, t.v1), (t.v1, t.v2), (t.v2, t.v0)] {

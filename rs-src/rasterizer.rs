@@ -13,6 +13,8 @@ use stb_image::image;
 use time::{PreciseTime};
 use std::cmp;
 use ansi_term;
+use scoped_threadpool;
+use std::cell::UnsafeCell;
 
 //
 // ------------------------------------------
@@ -1174,11 +1176,16 @@ struct TransformedVertex {
     col:   V3F        // Color
 }
 
-fn transform_vertices(mesh: &Mesh, w: i32, h: i32, eye: &P3F) -> Vec<TransformedVertex> {
-    // Build a mesh to viewport transformation and return a transformed set of vertices
+fn transform_vertices(vtx_in: &[Vertex],
+                      vtx_out: &mut [TransformedVertex],
+                      normalize_mesh_dimensions: &Mat4<f32>,
+                      w: i32,
+                      h: i32,
+                      eye: &P3F) {
+    // Build a mesh to viewport transformation and write out a transformed set of vertices
 
-    // Build transformations
-    let mesh_to_world       = mesh.normalize_dimensions();
+    // Build transformations (TODO: We do this for each chunk of vertices processed)
+    let mesh_to_world       = *normalize_mesh_dimensions;
     let world_to_view       = look_at(eye, &Pnt3::new(0.0, 0.0, 0.0), &Vec3::y());
     let view_to_proj        = perspective(45.0, w as f32 / h as f32, 0.1, 10.0);
     let wh                  = w as f32 / 2.0;
@@ -1194,13 +1201,8 @@ fn transform_vertices(mesh: &Mesh, w: i32, h: i32, eye: &P3F) -> Vec<Transformed
     let mesh_to_world_it_33 = na::from_homogeneous::<Mat4<f32>, Mat3<f32>>
                                   (&mesh_to_world.inv().unwrap().transpose());
 
-    // Transform and copy into uninitialized vector instead of copy and transform in-place
-    let mut vtx_transf: Vec<TransformedVertex> = Vec::with_capacity(mesh.vtx.len());
-    unsafe { vtx_transf.set_len(mesh.vtx.len()); }
-    for i in 0..mesh.vtx.len() {
-        let src = &mesh.vtx[i];
-        let dst = &mut vtx_transf[i];
-
+    // Transform and copy into target slice instead of copy and transform in-place
+    for (src, dst) in vtx_in.iter().zip(vtx_out.iter_mut()) {
         // Transform from mesh into world space
         let world_h: Pnt4<f32> = mesh_to_world * na::to_homogeneous(&src.p);
         dst.world = Vec3::new(world_h.x, world_h.y, world_h.z);
@@ -1224,8 +1226,6 @@ fn transform_vertices(mesh: &Mesh, w: i32, h: i32, eye: &P3F) -> Vec<Transformed
         // Copy color
         dst.col = src.col;
     }
-
-    vtx_transf
 }
 
 // The camera related functions in nalgebra like Iso3::look_at_z() and PerspMat3::new()
@@ -1876,7 +1876,7 @@ pub extern fn rast_benchmark() {
 }
 
 #[repr(i32)]
-#[derive(PartialEq)]
+#[derive(PartialEq, Copy, Clone)]
 pub enum RenderMode { Point, Line, Fill }
 
 #[no_mangle]
@@ -1892,8 +1892,6 @@ pub extern fn rast_draw(shade_per_pixel: i32,
                         fb: *mut u32) {
     // Transform, rasterize and shade mesh
 
-    // TODO: Parallelize everything
-
     // Avoid passing a bool over the FFI, convert now
     let shade_per_pixel: bool = shade_per_pixel != 0;
 
@@ -1906,14 +1904,48 @@ pub extern fn rast_draw(shade_per_pixel: i32,
     let (_, cm)              = cm_set_by_idx(env_map_idx);
     draw_bg_gradient(bg_idx, w, h, fb);
 
-    // Transform
-    let mut vtx_transf = transform_vertices(&mesh, w, h, &eye);
+    // Reusable thread pool
+    struct SyncPool {
+        cell: UnsafeCell<scoped_threadpool::Pool>
+    }
+    unsafe impl Sync for SyncPool { }
+    lazy_static! {
+        static ref POOL: SyncPool = {
+            let pool = scoped_threadpool::Pool::new(4);
+            SyncPool { cell: UnsafeCell::new(pool) }
+        };
+    }
+    let mut pool = unsafe { &mut *POOL.cell.get() };
 
-    // Do vertex shading?
-    if !shade_per_pixel && mode == RenderMode::Fill {
-        for vtx in &mut vtx_transf {
-            vtx.col = shader(&vtx.world, &vtx.n, &vtx.col, &eye, tick, cm);
-        }
+    // Prepare output buffer for transformed vertices
+    let mut vtx_transf: Vec<TransformedVertex> = Vec::with_capacity(mesh.vtx.len());
+    unsafe { vtx_transf.set_len(mesh.vtx.len()); }
+
+    // Transform and shade vertices in parallel
+    {
+        // Chunked iterators for both vertex input and output
+        let vtx_chunk_size    = cmp::max(mesh.vtx.len() / 8, 512);
+        let vtx_transf_chunks = vtx_transf.chunks_mut(vtx_chunk_size);
+        let vtx_mesh_chunks   = mesh.vtx.chunks(vtx_chunk_size);
+
+        let ndim = mesh.normalize_dimensions();
+
+        // Process chunks in parallel
+        pool.scoped(|scoped| {
+            for (cin, cout) in vtx_mesh_chunks.zip(vtx_transf_chunks) {
+                scoped.execute(move || {
+                    // Transform
+                    transform_vertices(cin, cout, &ndim, w, h, &eye);
+
+                    // Do vertex shading?
+                    if !shade_per_pixel && mode == RenderMode::Fill {
+                        for vtx in cout {
+                            vtx.col = shader(&vtx.world, &vtx.n, &vtx.col, &eye, tick, cm);
+                        }
+                    }
+                });
+            }
+        });
     }
 
     // Draw

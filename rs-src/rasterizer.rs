@@ -1932,8 +1932,12 @@ pub extern fn rast_draw(shade_per_pixel: i32,
     let mut vtx_transf: Vec<TransformedVertex> = Vec::with_capacity(mesh.vtx.len());
     unsafe { vtx_transf.set_len(mesh.vtx.len()); }
 
-    // Transform and shade vertices in parallel
-    {
+    // Transform and shade vertices. Only pick parallel processing if we actually have a
+    // significant number of vertices and also do per-vertex shading
+    let do_vtx_shading = !shade_per_pixel && mode == RenderMode::Fill;
+    if mesh.vtx.len() > 10000 && do_vtx_shading {
+        // Parallel processing
+
         // Chunked iterators for both vertex input and output
         let vtx_chunk_size    = cmp::max(mesh.vtx.len() / *NUM_THREADS, 512);
         let vtx_transf_chunks = vtx_transf.chunks_mut(vtx_chunk_size);
@@ -1945,11 +1949,8 @@ pub extern fn rast_draw(shade_per_pixel: i32,
         pool.scoped(|scoped| {
             for (cin, cout) in vtx_mesh_chunks.zip(vtx_transf_chunks) {
                 scoped.execute(move || {
-                    // Transform
                     transform_vertices(cin, cout, &ndim, w, h, &eye);
-
-                    // Do vertex shading?
-                    if !shade_per_pixel && mode == RenderMode::Fill {
+                    if do_vtx_shading {
                         for vtx in cout {
                             vtx.col = shader(&vtx.world, &vtx.n, &vtx.col, &eye, tick, cm);
                         }
@@ -1957,6 +1958,16 @@ pub extern fn rast_draw(shade_per_pixel: i32,
                 });
             }
         });
+    } else {
+        // Serial processing
+
+        transform_vertices
+            (&mesh.vtx[..], &mut vtx_transf[..], &mesh.normalize_dimensions(), w, h, &eye);
+        if do_vtx_shading {
+            for vtx in &mut vtx_transf {
+                vtx.col = shader(&vtx.world, &vtx.n, &vtx.col, &eye, tick, cm);
+            }
+        }
     }
 
     // Need to be able to send out framebuffer pointer across thread boundaries

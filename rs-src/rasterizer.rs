@@ -1527,9 +1527,13 @@ macro_rules! mk_rasterizer {
                      eye: &P3F,
                      tick: f64,
                      cm: &IrradianceCMSet,
+                     // Active tile / scissor rect
+                     tx1: i32,
+                     ty1: i32,
+                     tx2: i32,
+                     ty2: i32,
                      // Frame and depth buffer
-                     w: i32,
-                     h: i32,
+                     fb_stride: i32,
                      fb: *mut u32,
                      depth_ptr: *mut f32) {
         // TODO: This code would really benefit from SIMD intrinsics
@@ -1591,11 +1595,11 @@ macro_rules! mk_rasterizer {
         let max_x = (max3(x0, x1, x2) + 0xF) >> 4;
         let max_y = (max3(y0, y1, y2) + 0xF) >> 4;
 
-        // Clip against framebuffer
-        let min_x = na::clamp(min_x, 0, w);
-        let min_y = na::clamp(min_y, 0, h);
-        let max_x = na::clamp(max_x, 0, w);
-        let max_y = na::clamp(max_y, 0, h);
+        // Clip against tile (which we assume to be inside the framebuffer)
+        let min_x = cmp::max(min_x, tx1);
+        let min_y = cmp::max(min_y, ty1);
+        let max_x = cmp::min(max_x, tx2);
+        let max_y = cmp::min(max_y, ty2);
 
         // Implement bottom-left fill convention. Classifying those edges is simple, as with
         // CCW vertex order they are either descending or horizontally moving left to right.
@@ -1664,7 +1668,7 @@ macro_rules! mk_rasterizer {
             let mut e1x = e1y;
             let mut e2x = e2y;
 
-            let idx_y = y * w;
+            let idx_y = y * fb_stride;
             let mut inside = false;
 
             for x in min_x..max_x {
@@ -2032,12 +2036,14 @@ pub extern fn rast_draw(shade_per_pixel: i32,
                     rasterize_and_shade_triangle_pixel(
                         vtx0, vtx1, vtx2,
                         &shader, &eye, tick, cm,
-                        w, h, fb, depth_ptr);
+                        0, 0, w, h,
+                        w, fb, depth_ptr);
                 } else {
                     rasterize_and_shade_triangle_vertex(
                         vtx0, vtx1, vtx2,
                         &shader, &eye, tick, cm,
-                        w, h, fb, depth_ptr);
+                        0, 0, w, h,
+                        w, fb, depth_ptr);
                 }
             }
         }

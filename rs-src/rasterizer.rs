@@ -1918,7 +1918,8 @@ pub extern fn rast_draw(shade_per_pixel: i32,
             let num_threads = num_cpus::get();
             // Assume that if we have 1 or 2 threads our machine does not use HT,
             // otherwise divide by two to get the number of physical cores
-            if num_threads > 2 { num_threads / 2 } else { num_threads }
+            //if num_threads > 2 { num_threads / 2 } else { num_threads }
+            num_threads
         };
     }
 
@@ -2037,60 +2038,143 @@ pub extern fn rast_draw(shade_per_pixel: i32,
                 // Serial implementation
                 for t in &mesh.tri {
                     // Triangle vertices
-                    let vtx0 = unsafe { vtx_transf.get_unchecked(t.v0 as usize) };
-                    let vtx1 = unsafe { vtx_transf.get_unchecked(t.v1 as usize) };
-                    let vtx2 = unsafe { vtx_transf.get_unchecked(t.v2 as usize) };
+                    let v0 = unsafe { vtx_transf.get_unchecked(t.v0 as usize) };
+                    let v1 = unsafe { vtx_transf.get_unchecked(t.v1 as usize) };
+                    let v2 = unsafe { vtx_transf.get_unchecked(t.v2 as usize) };
 
                     if shade_per_pixel {
                         rasterize_and_shade_triangle_pixel(
-                            vtx0, vtx1, vtx2,
+                            v0, v1, v2,
                             &shader, &eye, tick, cm,
                             0, 0, w, h,
                             w, send_fb.ptr, send_depth.ptr);
                     } else {
                         rasterize_and_shade_triangle_vertex(
-                            vtx0, vtx1, vtx2,
+                            v0, v1, v2,
                             &shader, &eye, tick, cm,
                             0, 0, w, h,
                             w, send_fb.ptr, send_depth.ptr);
                     }
                 }
-            } else  {
+            } else {
+                static TILE_WDH: i32 = 64;
+                static TILE_HGT: i32 = 64;
+                struct Tile {
+                    tri_idx: Vec<i32>,
+                    x1:      i32,
+                    y1:      i32,
+                    x2:      i32,
+                    y2:      i32
+                };
+                let tw = (w + TILE_WDH - 1) / TILE_WDH;
+                let th = (h + TILE_HGT - 1) / TILE_HGT;
+                let mut tiles = Vec::new();
+
+                for ty in 0..th {
+                    for tx in 0..tw {
+                        let x1 = tx * TILE_WDH;
+                        let y1 = ty * TILE_HGT;
+                        let x2 = cmp::min(x1 + TILE_WDH, w);
+                        let y2 = cmp::min(y1 + TILE_HGT, h);
+
+                        tiles.push(Tile {
+                            tri_idx: Vec::with_capacity(256),
+                            x1: x1,
+                            y1: y1,
+                            x2: x2,
+                            y2: y2,
+                        });
+                    }
+                }
+
+                let vtx: &Vec<TransformedVertex> = &vtx_transf;
+
+                for i in 0..mesh.tri.len() {
+                    let t = &mesh.tri[i];
+                    let v0 = unsafe { vtx.get_unchecked(t.v0 as usize).vp };
+                    let v1 = unsafe { vtx.get_unchecked(t.v1 as usize).vp };
+                    let v2 = unsafe { vtx.get_unchecked(t.v2 as usize).vp };
+
+                    let x0 = (v0.x * 16.0) as i32;
+                    let y0 = (v0.y * 16.0) as i32;
+                    let x1 = (v1.x * 16.0) as i32;
+                    let y1 = (v1.y * 16.0) as i32;
+                    let x2 = (v2.x * 16.0) as i32;
+                    let y2 = (v2.y * 16.0) as i32;
+
+                    let tri_a2 = (x1 - x0) * (y2 - y0) - (y1 - y0) * (x2 - x0);
+                    if tri_a2 <= 0 { continue }
+
+                    let min_x = (min3(x0, x1, x2) + 0xF) >> 4;
+                    let min_y = (min3(y0, y1, y2) + 0xF) >> 4;
+                    let max_x = (max3(x0, x1, x2) + 0xF) >> 4;
+                    let max_y = (max3(y0, y1, y2) + 0xF) >> 4;
+
+                    /*
+                    let x0 = v0.x as i32;
+                    let y0 = v0.y as i32;
+                    let x1 = v1.x as i32;
+                    let y1 = v1.y as i32;
+                    let x2 = v2.x as i32;
+                    let y2 = v2.y as i32;
+
+                    let min_x = min3(x0, x1, x2);
+                    let min_y = min3(y0, y1, y2);
+                    let max_x = max3(x0, x1, x2);
+                    let max_y = max3(y0, y1, y2);
+                    */
+
+                    let min_x = min_x / TILE_WDH;
+                    let min_y = min_y / TILE_HGT;
+                    let max_x = max_x / TILE_WDH + 1;
+                    let max_y = max_y / TILE_HGT + 1;
+
+                    let min_x = na::clamp(min_x, 0, tw);
+                    let min_y = na::clamp(min_y, 0, th);
+                    let max_x = na::clamp(max_x, 0, tw);
+                    let max_y = na::clamp(max_y, 0, th);
+
+                    for ty in min_y..max_y {
+                        for tx in min_x..max_x {
+                            tiles[(tx + ty * tw) as usize].tri_idx.push(i as i32);
+                        }
+                    }
+                }
+
+                tiles.sort_by(|a, b| b.tri_idx.len().cmp(&a.tri_idx.len()));
+
                 pool.scoped(|scoped| {
-                    // Very basic parallel implementation. Split image into quadrants, draw all
-                    // triangles in each quadrant
-                    let quadrants = [
-                        (0, 0, w / 2, h / 2),
-                        (w / 2, 0, w, h / 2),
-                        (0, h / 2, w / 2, h),
-                        (w / 2, h / 2, w, h)
-                    ];
-                    let vtx: &Vec<TransformedVertex> = &vtx_transf;
-                    for &(tx1, ty1, tx2, ty2) in &quadrants {
+                    for tile in tiles {
+                        if tile.tri_idx.is_empty() { continue }
+
                         scoped.execute(move || {
-                            for t in &mesh.tri {
+                            for i in tile.tri_idx {
+                                let t = &mesh.tri[i as usize];
+
                                 // Triangle vertices
-                                let vtx0 = unsafe { vtx.get_unchecked(t.v0 as usize) };
-                                let vtx1 = unsafe { vtx.get_unchecked(t.v1 as usize) };
-                                let vtx2 = unsafe { vtx.get_unchecked(t.v2 as usize) };
+                                let v0 = unsafe { vtx.get_unchecked(t.v0 as usize) };
+                                let v1 = unsafe { vtx.get_unchecked(t.v1 as usize) };
+                                let v2 = unsafe { vtx.get_unchecked(t.v2 as usize) };
 
                                 if shade_per_pixel {
                                     rasterize_and_shade_triangle_pixel(
-                                        vtx0, vtx1, vtx2,
+                                        v0, v1, v2,
                                         &shader, &eye, tick, cm,
-                                        tx1, ty1, tx2, ty2,
+                                        tile.x1, tile.y1, tile.x2, tile.y2,
                                         w, send_fb.ptr, send_depth.ptr);
                                 } else {
                                     rasterize_and_shade_triangle_vertex(
-                                        vtx0, vtx1, vtx2,
+                                        v0, v1, v2,
                                         &shader, &eye, tick, cm,
-                                        tx1, ty1, tx2, ty2,
+                                        tile.x1, tile.y1, tile.x2, tile.y2,
                                         w, send_fb.ptr, send_depth.ptr);
                                 }
                             }
                         });
                     }
                 });
+
+
             }
         }
     }

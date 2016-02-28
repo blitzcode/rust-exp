@@ -1789,18 +1789,18 @@ pub extern fn rast_benchmark() {
 
     // Benchmark name, reference speed and function
     let benchmarks:[(&str, i64, &Fn() -> ()); 12] = [
-        ("KillerooV"  , 1905, &|| rast_draw(0, RenderMode::Fill, 0 , 5, 0, 0, 0., w, h, fb_ptr)),
-        ("HeadV"      , 2610, &|| rast_draw(0, RenderMode::Fill, 1 , 5, 0, 0, 0., w, h, fb_ptr)),
-        ("HandV"      ,  970, &|| rast_draw(0, RenderMode::Fill, 4 , 5, 0, 0, 0., w, h, fb_ptr)),
-        ("TorusKnotV" , 1279, &|| rast_draw(0, RenderMode::Fill, 6 , 5, 0, 0, 0., w, h, fb_ptr)),
-        ("CubeV"      , 1134, &|| rast_draw(0, RenderMode::Fill, 9 , 5, 0, 0, 0., w, h, fb_ptr)),
-        ("CornellBoxV", 1327, &|| rast_draw(0, RenderMode::Fill, 11, 5, 0, 0, 0., w, h, fb_ptr)),
-        ("KillerooP"  , 2532, &|| rast_draw(1, RenderMode::Fill, 0 , 5, 0, 0, 0., w, h, fb_ptr)),
-        ("HeadP"      , 3933, &|| rast_draw(1, RenderMode::Fill, 1 , 5, 0, 0, 0., w, h, fb_ptr)),
-        ("HandP"      , 1701, &|| rast_draw(1, RenderMode::Fill, 4 , 5, 0, 0, 0., w, h, fb_ptr)),
-        ("TorusKnotP" , 3113, &|| rast_draw(1, RenderMode::Fill, 6 , 5, 0, 0, 0., w, h, fb_ptr)),
-        ("CubeP"      , 3469, &|| rast_draw(1, RenderMode::Fill, 9 , 5, 0, 0, 0., w, h, fb_ptr)),
-        ("CornellBoxP", 3768, &|| rast_draw(1, RenderMode::Fill, 11, 5, 0, 0, 0., w, h, fb_ptr))
+        ("KillerooV"  , 1812, &|| rast_draw(0, RenderMode::Fill, 0 , 5, 0, 0, 0., w, h, fb_ptr)),
+        ("HeadV"      , 2500, &|| rast_draw(0, RenderMode::Fill, 1 , 5, 0, 0, 0., w, h, fb_ptr)),
+        ("HandV"      ,  910, &|| rast_draw(0, RenderMode::Fill, 4 , 5, 0, 0, 0., w, h, fb_ptr)),
+        ("TorusKnotV" , 1287, &|| rast_draw(0, RenderMode::Fill, 6 , 5, 0, 0, 0., w, h, fb_ptr)),
+        ("CubeV"      , 1107, &|| rast_draw(0, RenderMode::Fill, 9 , 5, 0, 0, 0., w, h, fb_ptr)),
+        ("CornellBoxV", 1326, &|| rast_draw(0, RenderMode::Fill, 11, 5, 0, 0, 0., w, h, fb_ptr)),
+        ("KillerooP"  , 2435, &|| rast_draw(1, RenderMode::Fill, 0 , 5, 0, 0, 0., w, h, fb_ptr)),
+        ("HeadP"      , 3841, &|| rast_draw(1, RenderMode::Fill, 1 , 5, 0, 0, 0., w, h, fb_ptr)),
+        ("HandP"      , 1689, &|| rast_draw(1, RenderMode::Fill, 4 , 5, 0, 0, 0., w, h, fb_ptr)),
+        ("TorusKnotP" , 3132, &|| rast_draw(1, RenderMode::Fill, 6 , 5, 0, 0, 0., w, h, fb_ptr)),
+        ("CubeP"      , 3461, &|| rast_draw(1, RenderMode::Fill, 9 , 5, 0, 0, 0., w, h, fb_ptr)),
+        ("CornellBoxP", 3786, &|| rast_draw(1, RenderMode::Fill, 11, 5, 0, 0, 0., w, h, fb_ptr))
     ];
 
     // Run once so all the one-time initialization etc. is done
@@ -1905,12 +1905,11 @@ pub extern fn rast_draw(shade_per_pixel: i32,
 
     // let tick: f64 = 0.0;
 
-    // Scene (mesh, camera, shader, environment, background)
+    // Scene (mesh, camera, shader, environment)
     let (_, camera, mesh)    = mesh_by_idx(mesh_idx);
     let eye                  = camera(tick);
     let (_, show_cm, shader) = shader_by_idx(shader_idx);
     let (_, cm)              = cm_set_by_idx(env_map_idx);
-    draw_bg_gradient(bg_idx, w, h, fb);
 
     // Number of threads we're supposed to use
     lazy_static! {
@@ -1935,47 +1934,67 @@ pub extern fn rast_draw(shade_per_pixel: i32,
     }
     let mut pool = unsafe { &mut *POOL.cell.get() };
 
+    // Depth buffer
+    let mut depth: Vec<f32> = Vec::new();
+
     // Prepare output buffer for transformed vertices
     let mut vtx_transf: Vec<TransformedVertex> = Vec::with_capacity(mesh.vtx.len());
     unsafe { vtx_transf.set_len(mesh.vtx.len()); }
 
-    // Transform and shade vertices. Only pick parallel processing if we
-    // actually have a significant vertex processing workload
-    let do_vtx_shading = !shade_per_pixel && mode == RenderMode::Fill;
-    let ndim           = mesh.normalize_dimensions();
-    if *NUM_THREADS > 1 && (mesh.vtx.len() > 10000 || (do_vtx_shading && mesh.vtx.len() > 2500)) {
-        // Parallel processing
+    {
+        // This is rather awkward, but we do gradient filling and depth clearing while we wait
+        // for the vertex processing worker threads. Gives a small speedup
+        let mut bg_and_depth = || {
+            // Fill the framebuffer with a gradient or solid color
+            draw_bg_gradient(bg_idx, w, h, fb);
 
-        // Chunked iterators for both vertex input and output
-        let vtx_chunk_size    = cmp::max(mesh.vtx.len() / *NUM_THREADS, 512);
-        let vtx_transf_chunks = vtx_transf.chunks_mut(vtx_chunk_size);
-        let vtx_mesh_chunks   = mesh.vtx.chunks(vtx_chunk_size);
+            // Allocate and clear depth buffer
+            if mode == RenderMode::Fill {
+                depth.resize((w * h) as usize, 1.0);
+            }
+        };
 
-        // Process chunks in parallel
-        pool.scoped(|scoped| {
-            for (cin, cout) in vtx_mesh_chunks.zip(vtx_transf_chunks) {
-                scoped.execute(move || {
-                    transform_vertices(cin, cout, &ndim, w, h, &eye);
-                    if do_vtx_shading {
-                        for vtx in cout {
-                            vtx.col = shader(&vtx.world, &vtx.n, &vtx.col, &eye, tick, cm);
+        // Transform and shade vertices. Only pick parallel processing if we
+        // actually have a significant vertex processing workload
+        let do_vtx_shading = !shade_per_pixel && mode == RenderMode::Fill;
+        let ndim           = mesh.normalize_dimensions();
+        if *NUM_THREADS > 1 && (                  mesh.vtx.len() > 10000 ||
+                               (do_vtx_shading && mesh.vtx.len() > 2500)) {
+            // Parallel processing
+
+            // Chunked iterators for both vertex input and output
+            let vtx_chunk_size    = cmp::max(mesh.vtx.len() / *NUM_THREADS, 512);
+            let vtx_transf_chunks = vtx_transf.chunks_mut(vtx_chunk_size);
+            let vtx_mesh_chunks   = mesh.vtx.chunks(vtx_chunk_size);
+
+            // Process chunks in parallel
+            pool.scoped(|scoped| {
+                for (cin, cout) in vtx_mesh_chunks.zip(vtx_transf_chunks) {
+                    scoped.execute(move || {
+                        transform_vertices(cin, cout, &ndim, w, h, &eye);
+                        if do_vtx_shading {
+                            for vtx in cout {
+                                vtx.col = shader(&vtx.world, &vtx.n, &vtx.col, &eye, tick, cm);
+                            }
                         }
-                    }
-                });
+                    });
+                }
+
+                // Do this before we start waiting for the pool
+                bg_and_depth();
+            });
+        } else {
+            // Serial processing
+
+            transform_vertices
+                (&mesh.vtx[..], &mut vtx_transf[..], &ndim, w, h, &eye);
+            if do_vtx_shading {
+                for vtx in &mut vtx_transf {
+                    vtx.col = shader(&vtx.world, &vtx.n, &vtx.col, &eye, tick, cm);
+                }
             }
 
-            // TODO: We could do a few things like preparing the depth buffer and drawing
-            //       the background gradient before we start waiting for the pool
-        });
-    } else {
-        // Serial processing
-
-        transform_vertices
-            (&mesh.vtx[..], &mut vtx_transf[..], &ndim, w, h, &eye);
-        if do_vtx_shading {
-            for vtx in &mut vtx_transf {
-                vtx.col = shader(&vtx.world, &vtx.n, &vtx.col, &eye, tick, cm);
-            }
+            bg_and_depth();
         }
     }
 
@@ -1986,7 +2005,8 @@ pub extern fn rast_draw(shade_per_pixel: i32,
     }
     unsafe impl Send for SendBufPtr<u32> { }
     unsafe impl Send for SendBufPtr<f32> { }
-    let send_fb = SendBufPtr { ptr: fb };
+    let send_fb    = SendBufPtr { ptr: fb };
+    let send_depth = SendBufPtr { ptr: depth.as_mut_ptr() };
 
     // Draw
     match mode {
@@ -2028,11 +2048,6 @@ pub extern fn rast_draw(shade_per_pixel: i32,
         RenderMode::Fill => {
             // Rasterize with a fixed-point half-space algorithm
 
-            // Allocate and clear depth buffer
-            let mut depth: Vec<f32> = Vec::new();
-            depth.resize((w * h) as usize, 1.0);
-            let send_depth = SendBufPtr { ptr: depth.as_mut_ptr() };
-
             if *NUM_THREADS == 1 {
                 // Serial implementation
 
@@ -2062,6 +2077,8 @@ pub extern fn rast_draw(shade_per_pixel: i32,
                 // Tiles
                 static TILE_WDH: i32 = 64;
                 static TILE_HGT: i32 = 64;
+                static TILE_WDH_SHIFT: i32 = 6;
+                static TILE_HGT_SHIFT: i32 = 6;
                 struct Tile {
                     tri_idx: Vec<i32>,
                     x1:      i32,
@@ -2098,7 +2115,8 @@ pub extern fn rast_draw(shade_per_pixel: i32,
                 // Bin mesh triangles into tiles
                 //
                 // TODO: This is slow for vertex heavy scenes, serial and duplicates
-                //       work from the rasterizer. Optimize / unify this
+                //       work from the rasterizer like fixed-point conversion, AABB
+                //       finding and backface culling. Optimize / unify this
                 //
                 for i in 0..mesh.tri.len() {
                     let t  = unsafe { &mesh.tri.get_unchecked(i as usize) };
@@ -2121,33 +2139,25 @@ pub extern fn rast_draw(shade_per_pixel: i32,
                     let max_x = (max3(x0, x1, x2) + 0xF) >> 4;
                     let max_y = (max3(y0, y1, y2) + 0xF) >> 4;
 
-                    /*
-                    let x0 = v0.x as i32;
-                    let y0 = v0.y as i32;
-                    let x1 = v1.x as i32;
-                    let y1 = v1.y as i32;
-                    let x2 = v2.x as i32;
-                    let y2 = v2.y as i32;
+                    // To tile coordinates
+                    let min_x =  min_x >> TILE_WDH_SHIFT;
+                    let min_y =  min_y >> TILE_HGT_SHIFT;
+                    let max_x = (max_x >> TILE_WDH_SHIFT) + 1;
+                    let max_y = (max_y >> TILE_HGT_SHIFT) + 1;
 
-                    let min_x = min3(x0, x1, x2);
-                    let min_y = min3(y0, y1, y2);
-                    let max_x = max3(x0, x1, x2);
-                    let max_y = max3(y0, y1, y2);
-                    */
-
-                    let min_x = min_x / TILE_WDH;
-                    let min_y = min_y / TILE_HGT;
-                    let max_x = max_x / TILE_WDH + 1;
-                    let max_y = max_y / TILE_HGT + 1;
-
+                    // Clip against framebuffer
                     let min_x = na::clamp(min_x, 0, tw);
                     let min_y = na::clamp(min_y, 0, th);
                     let max_x = na::clamp(max_x, 0, tw);
                     let max_y = na::clamp(max_y, 0, th);
 
+                    // Add to tile bins
                     for ty in min_y..max_y {
                         for tx in min_x..max_x {
-                            tiles[(tx + ty * tw) as usize].tri_idx.push(i as i32);
+                            unsafe {
+                                tiles.get_unchecked_mut
+                                    ((tx + ty * tw) as usize).tri_idx.push(i as i32);
+                            }
                         }
                     }
                 }

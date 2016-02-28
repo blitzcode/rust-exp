@@ -1963,6 +1963,9 @@ pub extern fn rast_draw(shade_per_pixel: i32,
                     }
                 });
             }
+
+            // TODO: We could do a few things like preparing the depth buffer and drawing
+            //       the background gradient before we start waiting for the pool
         });
     } else {
         // Serial processing

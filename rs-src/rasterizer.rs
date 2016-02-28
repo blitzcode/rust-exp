@@ -1789,18 +1789,18 @@ pub extern fn rast_benchmark() {
 
     // Benchmark name, reference speed and function
     let benchmarks:[(&str, i64, &Fn() -> ()); 12] = [
-        ("KillerooV"  , 2309, &|| rast_draw(0, RenderMode::Fill, 0 , 5, 0, 0, 0., w, h, fb_ptr)),
-        ("HeadV"      , 2629, &|| rast_draw(0, RenderMode::Fill, 1 , 5, 0, 0, 0., w, h, fb_ptr)),
-        ("HandV"      ,  950, &|| rast_draw(0, RenderMode::Fill, 4 , 5, 0, 0, 0., w, h, fb_ptr)),
-        ("TorusKnotV" , 1390, &|| rast_draw(0, RenderMode::Fill, 6 , 5, 0, 0, 0., w, h, fb_ptr)),
-        ("CubeV"      , 1201, &|| rast_draw(0, RenderMode::Fill, 9 , 5, 0, 0, 0., w, h, fb_ptr)),
-        ("CornellBoxV", 1564, &|| rast_draw(0, RenderMode::Fill, 11, 5, 0, 0, 0., w, h, fb_ptr)),
-        ("KillerooP"  , 4136, &|| rast_draw(1, RenderMode::Fill, 0 , 5, 0, 0, 0., w, h, fb_ptr)),
-        ("HeadP"      , 4886, &|| rast_draw(1, RenderMode::Fill, 1 , 5, 0, 0, 0., w, h, fb_ptr)),
-        ("HandP"      , 2316, &|| rast_draw(1, RenderMode::Fill, 4 , 5, 0, 0, 0., w, h, fb_ptr)),
-        ("TorusKnotP" , 4195, &|| rast_draw(1, RenderMode::Fill, 6 , 5, 0, 0, 0., w, h, fb_ptr)),
-        ("CubeP"      , 4550, &|| rast_draw(1, RenderMode::Fill, 9 , 5, 0, 0, 0., w, h, fb_ptr)),
-        ("CornellBoxP", 5617, &|| rast_draw(1, RenderMode::Fill, 11, 5, 0, 0, 0., w, h, fb_ptr))
+        ("KillerooV"  , 1905, &|| rast_draw(0, RenderMode::Fill, 0 , 5, 0, 0, 0., w, h, fb_ptr)),
+        ("HeadV"      , 2610, &|| rast_draw(0, RenderMode::Fill, 1 , 5, 0, 0, 0., w, h, fb_ptr)),
+        ("HandV"      ,  970, &|| rast_draw(0, RenderMode::Fill, 4 , 5, 0, 0, 0., w, h, fb_ptr)),
+        ("TorusKnotV" , 1279, &|| rast_draw(0, RenderMode::Fill, 6 , 5, 0, 0, 0., w, h, fb_ptr)),
+        ("CubeV"      , 1134, &|| rast_draw(0, RenderMode::Fill, 9 , 5, 0, 0, 0., w, h, fb_ptr)),
+        ("CornellBoxV", 1327, &|| rast_draw(0, RenderMode::Fill, 11, 5, 0, 0, 0., w, h, fb_ptr)),
+        ("KillerooP"  , 2532, &|| rast_draw(1, RenderMode::Fill, 0 , 5, 0, 0, 0., w, h, fb_ptr)),
+        ("HeadP"      , 3933, &|| rast_draw(1, RenderMode::Fill, 1 , 5, 0, 0, 0., w, h, fb_ptr)),
+        ("HandP"      , 1701, &|| rast_draw(1, RenderMode::Fill, 4 , 5, 0, 0, 0., w, h, fb_ptr)),
+        ("TorusKnotP" , 3113, &|| rast_draw(1, RenderMode::Fill, 6 , 5, 0, 0, 0., w, h, fb_ptr)),
+        ("CubeP"      , 3469, &|| rast_draw(1, RenderMode::Fill, 9 , 5, 0, 0, 0., w, h, fb_ptr)),
+        ("CornellBoxP", 3768, &|| rast_draw(1, RenderMode::Fill, 11, 5, 0, 0, 0., w, h, fb_ptr))
     ];
 
     // Run once so all the one-time initialization etc. is done
@@ -1811,7 +1811,7 @@ pub extern fn rast_benchmark() {
     timings.resize(benchmarks.len(), i64::MAX);
 
     // Run all benchmarks multiple times
-    let num_runs = 25;
+    let num_runs = 40;
     for _ in 0..num_runs  {
         for i in 0..benchmarks.len() {
             // Measure and run
@@ -1915,11 +1915,10 @@ pub extern fn rast_draw(shade_per_pixel: i32,
     // Number of threads we're supposed to use
     lazy_static! {
         static ref NUM_THREADS: usize = {
-            let num_threads = num_cpus::get();
-            // Assume that if we have 1 or 2 threads our machine does not use HT,
-            // otherwise divide by two to get the number of physical cores
-            //if num_threads > 2 { num_threads / 2 } else { num_threads }
-            num_threads
+            // Vertex processing seems to be slightly faster if we have one thread for each
+            // physical core, rasterization / shading benefits strongly from HT. Use the full
+            // thread count for now
+            num_cpus::get()
         };
     }
 
@@ -2036,6 +2035,7 @@ pub extern fn rast_draw(shade_per_pixel: i32,
 
             if *NUM_THREADS == 1 {
                 // Serial implementation
+
                 for t in &mesh.tri {
                     // Triangle vertices
                     let v0 = unsafe { vtx_transf.get_unchecked(t.v0 as usize) };
@@ -2057,6 +2057,9 @@ pub extern fn rast_draw(shade_per_pixel: i32,
                     }
                 }
             } else {
+                // Parallel implementation
+
+                // Tiles
                 static TILE_WDH: i32 = 64;
                 static TILE_HGT: i32 = 64;
                 struct Tile {
@@ -2068,16 +2071,19 @@ pub extern fn rast_draw(shade_per_pixel: i32,
                 };
                 let tw = (w + TILE_WDH - 1) / TILE_WDH;
                 let th = (h + TILE_HGT - 1) / TILE_HGT;
-                let mut tiles = Vec::new();
 
+                // Build tile array
+                let mut tiles = Vec::new();
                 for ty in 0..th {
                     for tx in 0..tw {
                         let x1 = tx * TILE_WDH;
                         let y1 = ty * TILE_HGT;
-                        let x2 = cmp::min(x1 + TILE_WDH, w);
+                        let x2 = cmp::min(x1 + TILE_WDH, w); // Clip upper bound against FB
                         let y2 = cmp::min(y1 + TILE_HGT, h);
 
                         tiles.push(Tile {
+                            // We can prevent a lot of allocations by starting
+                            // with a reasonable capacity
                             tri_idx: Vec::with_capacity(256),
                             x1: x1,
                             y1: y1,
@@ -2089,8 +2095,13 @@ pub extern fn rast_draw(shade_per_pixel: i32,
 
                 let vtx: &Vec<TransformedVertex> = &vtx_transf;
 
+                // Bin mesh triangles into tiles
+                //
+                // TODO: This is slow for vertex heavy scenes, serial and duplicates
+                //       work from the rasterizer. Optimize / unify this
+                //
                 for i in 0..mesh.tri.len() {
-                    let t = &mesh.tri[i];
+                    let t  = unsafe { &mesh.tri.get_unchecked(i as usize) };
                     let v0 = unsafe { vtx.get_unchecked(t.v0 as usize).vp };
                     let v1 = unsafe { vtx.get_unchecked(t.v1 as usize).vp };
                     let v2 = unsafe { vtx.get_unchecked(t.v2 as usize).vp };
@@ -2141,17 +2152,19 @@ pub extern fn rast_draw(shade_per_pixel: i32,
                     }
                 }
 
+                // Scheduling generally works better when we start with the most
+                // expensive tiles, which tend to be the ones with the most triangles
                 tiles.sort_by(|a, b| b.tri_idx.len().cmp(&a.tri_idx.len()));
 
                 pool.scoped(|scoped| {
                     for tile in tiles {
+                        // Don't create jobs for empty tiles
                         if tile.tri_idx.is_empty() { continue }
 
                         scoped.execute(move || {
                             for i in tile.tri_idx {
-                                let t = &mesh.tri[i as usize];
-
                                 // Triangle vertices
+                                let t  = unsafe { &mesh.tri.get_unchecked(i as usize) };
                                 let v0 = unsafe { vtx.get_unchecked(t.v0 as usize) };
                                 let v1 = unsafe { vtx.get_unchecked(t.v1 as usize) };
                                 let v2 = unsafe { vtx.get_unchecked(t.v2 as usize) };
@@ -2173,8 +2186,6 @@ pub extern fn rast_draw(shade_per_pixel: i32,
                         });
                     }
                 });
-
-
             }
         }
     }

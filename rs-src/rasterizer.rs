@@ -13,7 +13,7 @@ use stb_image::image;
 use time::{PreciseTime};
 use std::cmp;
 use ansi_term;
-use scoped_threadpool;
+use jobsteal;
 use std::cell::UnsafeCell;
 use num_cpus;
 
@@ -1923,12 +1923,12 @@ pub extern fn rast_draw(shade_per_pixel: i32,
 
     // Reusable thread pool
     struct SyncPool {
-        cell: UnsafeCell<scoped_threadpool::Pool>
+        cell: UnsafeCell<jobsteal::Pool>
     }
     unsafe impl Sync for SyncPool { }
     lazy_static! {
         static ref POOL: SyncPool = {
-            let pool = scoped_threadpool::Pool::new(*NUM_THREADS as u32);
+            let pool = jobsteal::make_pool(*NUM_THREADS as usize).unwrap();
             SyncPool { cell: UnsafeCell::new(pool) }
         };
     }
@@ -1968,9 +1968,9 @@ pub extern fn rast_draw(shade_per_pixel: i32,
             let vtx_mesh_chunks   = mesh.vtx.chunks(vtx_chunk_size);
 
             // Process chunks in parallel
-            pool.scoped(|scoped| {
+            pool.scope(|scoped| {
                 for (cin, cout) in vtx_mesh_chunks.zip(vtx_transf_chunks) {
-                    scoped.execute(move || {
+                    scoped.submit(move || {
                         transform_vertices(cin, cout, &ndim, w, h, &eye);
                         if do_vtx_shading {
                             for vtx in cout {
@@ -2029,10 +2029,10 @@ pub extern fn rast_draw(shade_per_pixel: i32,
 
         RenderMode::Line => {
             // Line drawing can be done in parallel
-            pool.scoped(|scoped| {
+            pool.scope(|scoped| {
                 let vtx: &Vec<TransformedVertex> = &vtx_transf;
                 for chunk in mesh.tri.chunks(cmp::max(mesh.tri.len() / *NUM_THREADS, 512)) {
-                    scoped.execute(move || {
+                    scoped.submit(move || {
                         for t in chunk {
                             for &(idx1, idx2) in &[(t.v0, t.v1), (t.v1, t.v2), (t.v2, t.v0)] {
                                 let vp1 = &vtx[idx1 as usize].vp;
@@ -2166,12 +2166,12 @@ pub extern fn rast_draw(shade_per_pixel: i32,
                 // expensive tiles, which tend to be the ones with the most triangles
                 tiles.sort_by(|a, b| b.tri_idx.len().cmp(&a.tri_idx.len()));
 
-                pool.scoped(|scoped| {
+                pool.scope(|scoped| {
                     for tile in tiles {
                         // Don't create jobs for empty tiles
                         if tile.tri_idx.is_empty() { continue }
 
-                        scoped.execute(move || {
+                        scoped.submit(move || {
                             for i in tile.tri_idx {
                                 // Triangle vertices
                                 let t  = unsafe { &mesh.tri.get_unchecked(i as usize) };

@@ -1,6 +1,6 @@
 
-use na::{Vec3, Vec4, Pnt3, Pnt4, Mat3, Mat4, Iso3};
-use na::{Norm, Diag, Inv, Transpose};
+use na::{Vector3, Vector4, Point3, Point4, Matrix3, Matrix4, Isometry3};
+use na::{Norm, Diagonal, Inverse, Transpose};
 use na;
 use std::path;
 use std::fs::File;
@@ -23,8 +23,8 @@ use num_cpus;
 // ------------------------------------------
 //
 
-type V3F = Vec3<f32>;
-type P3F = Pnt3<f32>;
+type V3F = Vector3<f32>;
+type P3F = Point3<f32>;
 
 fn deg_to_rad(deg: f32) -> f32 {
     // std::f32::to_radians() is still unstable
@@ -54,7 +54,7 @@ fn face_normal(v0: &P3F, v1: &P3F, v2: &P3F) -> V3F {
 fn fast_normalize(n: &V3F) -> V3F {
     // nalgbera doesn't use a reciprocal
     let l = 1.0 / (n.x * n.x + n.y * n.y + n.z * n.z).sqrt();
-    Vec3::new(n.x * l, n.y * l, n.z * l)
+    Vector3::new(n.x * l, n.y * l, n.z * l)
 }
 
 fn reflect(i: &V3F, n: &V3F) -> V3F {
@@ -79,9 +79,9 @@ impl Vertex {
            nx: f32, ny: f32, nz: f32,
            r:  f32, g:  f32, b:  f32) -> Vertex {
         Vertex {
-            p:   Pnt3::new(px, py, pz),
-            n:   Vec3::new(nx, ny, nz),
-            col: Vec3::new(r , g , b)
+            p:   Point3 ::new(px, py, pz),
+            n:   Vector3::new(nx, ny, nz),
+            col: Vector3::new(r , g , b)
         }
     }
 }
@@ -115,8 +115,8 @@ impl Mesh {
     }
 
     fn update_aabb(&mut self) {
-        self.aabb_min = Vec3::new(f32::MAX, f32::MAX, f32::MAX);
-        self.aabb_max = Vec3::new(f32::MIN, f32::MIN, f32::MIN);
+        self.aabb_min = Vector3::new(f32::MAX, f32::MAX, f32::MAX);
+        self.aabb_max = Vector3::new(f32::MIN, f32::MIN, f32::MIN);
 
         for v in &self.vtx {
             self.aabb_min.x = if self.aabb_min.x < v.p.x { self.aabb_min.x } else { v.p.x };
@@ -128,19 +128,19 @@ impl Mesh {
         }
     }
 
-    fn normalize_dimensions(&self) -> Mat4<f32> {
+    fn normalize_dimensions(&self) -> Matrix4<f32> {
         // Build a matrix to transform the mesh to a unit cube with the origin as its center
 
         // Translate to center
         let center = (self.aabb_min + self.aabb_max) / 2.0;
-        let transf = Iso3::new(-center, na::zero());
+        let transf = Isometry3::new(-center, na::zero());
 
         // Scale to unit cube
         let extends = self.aabb_max - self.aabb_min;
         let extends_max = max3(extends.x, extends.y, extends.z);
         let extends_scale = 1.0 / extends_max;
-        let scale: Mat4<f32> =
-            Diag::from_diag(&Vec4::new(extends_scale, extends_scale, extends_scale, 1.0));
+        let scale: Matrix4<f32> =
+            Diagonal::from_diagonal(&Vector4::new(extends_scale, extends_scale, extends_scale, 1.0));
 
         scale * na::to_homogeneous(&transf)
     }
@@ -319,15 +319,15 @@ fn load_mesh(file_name: &str, mesh_file_type: MeshFileType) -> Mesh {
             // Set vertex normals from face normal
             // TODO: This obviously does not take sharing into account at all, but it's
             //       OK for now as we're only using it with very simple meshes
-            let v0p = Pnt3::new(vtx[tri_idx.0 as usize].p.x,
-                                vtx[tri_idx.0 as usize].p.y,
-                                vtx[tri_idx.0 as usize].p.z);
-            let v1p = Pnt3::new(vtx[tri_idx.1 as usize].p.x,
-                                vtx[tri_idx.1 as usize].p.y,
-                                vtx[tri_idx.1 as usize].p.z);
-            let v2p = Pnt3::new(vtx[tri_idx.2 as usize].p.x,
-                                vtx[tri_idx.2 as usize].p.y,
-                                vtx[tri_idx.2 as usize].p.z);
+            let v0p = Point3::new(vtx[tri_idx.0 as usize].p.x,
+                                  vtx[tri_idx.0 as usize].p.y,
+                                  vtx[tri_idx.0 as usize].p.z);
+            let v1p = Point3::new(vtx[tri_idx.1 as usize].p.x,
+                                  vtx[tri_idx.1 as usize].p.y,
+                                  vtx[tri_idx.1 as usize].p.z);
+            let v2p = Point3::new(vtx[tri_idx.2 as usize].p.x,
+                                  vtx[tri_idx.2 as usize].p.y,
+                                  vtx[tri_idx.2 as usize].p.z);
             let n = face_normal(&v0p, &v1p, &v2p);
             vtx[tri_idx.0 as usize].n = n;
             vtx[tri_idx.1 as usize].n = n;
@@ -419,16 +419,16 @@ type CameraFromTime = fn(f64) -> P3F;
 
 fn cam_orbit(tick: f64) -> P3F {
     // Orbit around object
-    Pnt3::new(((tick / 1.25).cos() * 1.8) as f32,
-              0.0,
-              ((tick / 1.25).sin() * 1.8) as f32)
+    Point3::new(((tick / 1.25).cos() * 1.8) as f32,
+                0.0,
+                ((tick / 1.25).sin() * 1.8) as f32)
 }
 
 fn cam_orbit_closer(tick: f64) -> P3F {
     // Orbit closer around object
-    Pnt3::new(((tick / 1.25).cos() * 1.6) as f32,
-              0.0,
-              ((tick / 1.25).sin() * 1.6) as f32)
+    Point3::new(((tick / 1.25).cos() * 1.6) as f32,
+                0.0,
+                ((tick / 1.25).sin() * 1.6) as f32)
 }
 
 fn cam_orbit_front(tick: f64) -> P3F {
@@ -445,23 +445,23 @@ fn cam_orbit_front(tick: f64) -> P3F {
     let b_weight  = smooth;
     let tick_seg  = -consts::PI / 2.0 -
                     (-(consts::PI / 6.0) * a_weight + (consts::PI / 6.0) * b_weight);
-    Pnt3::new(tick_seg.cos() as f32,
-              ((tick / 2.0).sin() * 0.25 + 0.2) as f32,
-              tick_seg.sin() as f32)
+    Point3::new(tick_seg.cos() as f32,
+                ((tick / 2.0).sin() * 0.25 + 0.2) as f32,
+                tick_seg.sin() as f32)
 }
 
 fn cam_pan_front(tick: f64) -> P3F {
     // Camera makes circular motion looking at the mesh
-    Pnt3::new((tick.cos() * 0.3) as f32,
-              (tick.sin() * 0.3) as f32 + 0.4,
-              1.7)
+    Point3::new((tick.cos() * 0.3) as f32,
+                (tick.sin() * 0.3) as f32 + 0.4,
+                1.7)
 }
 
 fn cam_pan_back(tick: f64) -> P3F {
     // Camera makes circular motion looking at the box (which is open at the back)
-    Pnt3::new((tick.cos() * 0.3) as f32,
-              (tick.sin() * 0.3) as f32,
-              -2.0)
+    Point3::new((tick.cos() * 0.3) as f32,
+                (tick.sin() * 0.3) as f32,
+                -2.0)
 }
 
 fn smootherstep(edge0: f32, edge1: f32, x: f32) -> f32
@@ -598,7 +598,7 @@ fn load_cm_face(file_name: &String, flip_x: bool, flip_y: bool) -> CMFace {
         for x in 0..CM_FACE_WDH {
             face[(if flip_x { CM_FACE_WDH - 1 - x } else { x } +
                   if flip_y { CM_FACE_WDH - 1 - y } else { y } * CM_FACE_WDH) as usize] =
-                Vec3::new(img.data[(x * 3 + y * CM_FACE_WDH * 3 + 0) as usize],
+                Vector3::new(img.data[(x * 3 + y * CM_FACE_WDH * 3 + 0) as usize],
                           img.data[(x * 3 + y * CM_FACE_WDH * 3 + 1) as usize],
                           img.data[(x * 3 + y * CM_FACE_WDH * 3 + 2) as usize]);
         }
@@ -683,7 +683,7 @@ fn cm_texel_from_dir(dir: &V3F) -> (CMFaceName, i32)  {
     let face;
     let mut u;
     let mut v;
-    let dir_abs = Vec3::new(dir.x.abs(), dir.y.abs(), dir.z.abs());
+    let dir_abs = Vector3::new(dir.x.abs(), dir.y.abs(), dir.z.abs());
 
     // Find major axis
     if dir_abs.x > dir_abs.y && dir_abs.x > dir_abs.z {
@@ -833,7 +833,7 @@ fn shader_n_to_color(_: &V3F, n: &V3F, _: &V3F, _: &P3F, _: f64, _: &IrradianceC
 
 fn shader_headlight(p: &V3F, n: &V3F, col: &V3F, eye: &P3F, _: f64, _: &IrradianceCMSet) -> V3F {
     let n         = fast_normalize(n);
-    let l         = fast_normalize(&(*eye.as_vec() - *p));
+    let l         = fast_normalize(&(*eye.as_vector() - *p));
     let ldotn     = na::clamp(na::dot(&l, &n), 0.0, 1.0);
     let occlusion = *col * *col;
     occlusion * ldotn
@@ -844,9 +844,9 @@ fn shader_dir_light(p: &V3F, n: &V3F, col: &V3F, eye: &P3F, _tick: f64,
     // Specular material lit by two light sources
 
     let n   = fast_normalize(n);
-    let eye = *p - *eye.as_vec();
+    let eye = *p - *eye.as_vector();
     let r   = fast_normalize(&reflect(&eye, &n));
-    let l   = Vec3::new(0.577350269, 0.577350269, 0.577350269); // Normalized (1, 1, 1)
+    let l   = Vector3::new(0.577350269, 0.577350269, 0.577350269); // Normalized (1, 1, 1)
 
     let light_1 = {
         let ldotn =                 na::clamp(na::dot(&l, &n), 0.0, 1.0);
@@ -860,9 +860,9 @@ fn shader_dir_light(p: &V3F, n: &V3F, col: &V3F, eye: &P3F, _tick: f64,
         ldotn * 0.25 + ldotr * 0.75
     };
 
-    let ambient   = Vec3::new(0.05, 0.05, 0.05);
-    let light     = Vec3::new(1.0, 0.5, 0.5) * light_1 +
-                    Vec3::new(0.5, 0.5, 1.0) * light_2 +
+    let ambient   = Vector3::new(0.05, 0.05, 0.05);
+    let light     = Vector3::new(1.0, 0.5, 0.5) * light_1 +
+                    Vector3::new(0.5, 0.5, 1.0) * light_2 +
                     ambient;
     let occlusion = *col * *col;
 
@@ -883,7 +883,7 @@ fn shader_cm_diffuse(_p: &V3F, n: &V3F, col: &V3F, _eye: &P3F, _tick: f64,
 fn shader_cm_refl(p: &V3F, n: &V3F, col: &V3F, eye: &P3F, _tick: f64,
                   cm: &IrradianceCMSet) -> V3F {
     let n     = fast_normalize(n);
-    let eye   = *p - *eye.as_vec();
+    let eye   = *p - *eye.as_vector();
     let r     = reflect(&eye, &n);
     let r_tex = cm_texel_from_dir(&r);
 
@@ -897,7 +897,7 @@ fn shader_cm_refl(p: &V3F, n: &V3F, col: &V3F, eye: &P3F, _tick: f64,
 fn shader_cm_coated(p: &V3F, n: &V3F, col: &V3F, eye: &P3F, _tick: f64,
                     cm: &IrradianceCMSet) -> V3F {
     let n       = fast_normalize(n);
-    let eye     = *p - *eye.as_vec();
+    let eye     = *p - *eye.as_vector();
     let r       = reflect(&eye, &n);
     let r_tex   = cm_texel_from_dir(&r);
     let fresnel = fresnel_conductor(na::dot(&-eye, &n), 1.0, 1.1);
@@ -912,7 +912,7 @@ fn shader_cm_coated(p: &V3F, n: &V3F, col: &V3F, eye: &P3F, _tick: f64,
 fn shader_cm_diff_rim(p: &V3F, n: &V3F, col: &V3F, eye: &P3F, _: f64,
                       cm: &IrradianceCMSet) -> V3F {
     let n   = fast_normalize(n);
-    let eye = *p - *eye.as_vec();
+    let eye = *p - *eye.as_vector();
 
     let fresnel = fresnel_conductor(na::dot(&-eye, &n), 1.0, 1.1);
 
@@ -922,7 +922,7 @@ fn shader_cm_diff_rim(p: &V3F, n: &V3F, col: &V3F, eye: &P3F, _: f64,
 fn shader_cm_glossy(p: &V3F, n: &V3F, col: &V3F, eye: &P3F, _tick: f64,
                     cm: &IrradianceCMSet) -> V3F {
     let n   = fast_normalize(n);
-    let eye = *p - *eye.as_vec();
+    let eye = *p - *eye.as_vector();
     let r   = reflect(&eye, &n);
 
     ( lookup_dir_cm(&cm.cos_1, &n)
@@ -934,11 +934,11 @@ fn shader_cm_glossy(p: &V3F, n: &V3F, col: &V3F, eye: &P3F, _tick: f64,
 fn shader_cm_green_highlight(p: &V3F, n: &V3F, col: &V3F, eye: &P3F, _tick: f64,
                              cm: &IrradianceCMSet) -> V3F {
     let n   = fast_normalize(n);
-    let eye = *p - *eye.as_vec();
+    let eye = *p - *eye.as_vector();
     let r   = reflect(&eye, &n);
 
     ( lookup_dir_cm(&cm.cos_1 , &n)
-    + lookup_dir_cm(&cm.cos_64, &r) * normalize_phong_lobe(64.0) * Vec3::new(0.2, 0.8, 0.2)
+    + lookup_dir_cm(&cm.cos_64, &r) * normalize_phong_lobe(64.0) * Vector3::new(0.2, 0.8, 0.2)
     )
     * (*col * *col)
 }
@@ -946,10 +946,10 @@ fn shader_cm_green_highlight(p: &V3F, n: &V3F, col: &V3F, eye: &P3F, _tick: f64,
 fn shader_cm_red_material(p: &V3F, n: &V3F, col: &V3F, eye: &P3F, _tick: f64,
                           cm: &IrradianceCMSet) -> V3F {
     let n   = fast_normalize(n);
-    let eye = *p - *eye.as_vec();
+    let eye = *p - *eye.as_vector();
     let r   = reflect(&eye, &n);
 
-    ( lookup_dir_cm(&cm.cos_1  , &n) * Vec3::new(0.8, 0.2, 0.2)
+    ( lookup_dir_cm(&cm.cos_1  , &n) * Vector3::new(0.8, 0.2, 0.2)
     + lookup_dir_cm(&cm.cos_512, &r) * normalize_phong_lobe(512.0)
     )
     * (*col * *col)
@@ -958,7 +958,7 @@ fn shader_cm_red_material(p: &V3F, n: &V3F, col: &V3F, eye: &P3F, _tick: f64,
 fn shader_cm_metallic(p: &V3F, n: &V3F, col: &V3F, eye: &P3F, _tick: f64,
                       cm: &IrradianceCMSet) -> V3F {
     let n     = fast_normalize(n);
-    let eye   = *p - *eye.as_vec();
+    let eye   = *p - *eye.as_vector();
     let r     = reflect(&eye, &n);
     let r_tex = cm_texel_from_dir(&r);
 
@@ -971,7 +971,7 @@ fn shader_cm_metallic(p: &V3F, n: &V3F, col: &V3F, eye: &P3F, _tick: f64,
 fn shader_cm_super_shiny(p: &V3F, n: &V3F, col: &V3F, eye: &P3F, _tick: f64,
                          cm: &IrradianceCMSet) -> V3F {
     let n     = fast_normalize(n);
-    let eye   = *p - *eye.as_vec();
+    let eye   = *p - *eye.as_vector();
     let r     = reflect(&eye, &n);
     let r_tex = cm_texel_from_dir(&r);
 
@@ -985,11 +985,11 @@ fn shader_cm_super_shiny(p: &V3F, n: &V3F, col: &V3F, eye: &P3F, _tick: f64,
 fn shader_cm_gold(p: &V3F, n: &V3F, col: &V3F, eye: &P3F, _tick: f64,
                   cm: &IrradianceCMSet) -> V3F {
     let n      = fast_normalize(n);
-    let l      = fast_normalize(&(*eye.as_vec() - *p));
+    let l      = fast_normalize(&(*eye.as_vector() - *p));
     let ldotn  = na::clamp(na::dot(&l, &n), 0.0, 1.0);
-    let eye    = *p - *eye.as_vec();
+    let eye    = *p - *eye.as_vector();
     let r      = reflect(&eye, &n);
-    let albedo = Vec3::new(1.0, 0.76, 0.33);
+    let albedo = Vector3::new(1.0, 0.76, 0.33);
     let r_tex  = cm_texel_from_dir(&r);
 
     ( lookup_dir_cm  (&cm.cos_1  , &n)                                  * ldotn
@@ -1002,13 +1002,13 @@ fn shader_cm_gold(p: &V3F, n: &V3F, col: &V3F, eye: &P3F, _tick: f64,
 fn shader_cm_blue(p: &V3F, n: &V3F, col: &V3F, eye: &P3F, _tick: f64,
                   cm: &IrradianceCMSet) -> V3F {
     let n      = fast_normalize(n);
-    let l      = fast_normalize(&(*eye.as_vec() - *p));
+    let l      = fast_normalize(&(*eye.as_vector() - *p));
     let ldotn  = na::clamp(na::dot(&l, &n), 0.0, 1.0);
-    let eye    = *p - *eye.as_vec();
+    let eye    = *p - *eye.as_vector();
     let r      = reflect(&eye, &n);
     let r_tex  = cm_texel_from_dir(&r);
 
-    ( lookup_dir_cm  (&cm.cos_1  ,  &n)   * Vec3::new(0.2, 0.2, 0.8)    * ldotn
+    ( lookup_dir_cm  (&cm.cos_1  ,  &n)   * Vector3::new(0.2, 0.2, 0.8) * ldotn
     + lookup_texel_cm(&cm.cos_64 , r_tex) * normalize_phong_lobe(64.0 ) * 0.75
     + lookup_texel_cm(&cm.cos_512, r_tex) * normalize_phong_lobe(512.0) * (1.0 - ldotn)
     )
@@ -1018,7 +1018,7 @@ fn shader_cm_blue(p: &V3F, n: &V3F, col: &V3F, eye: &P3F, _tick: f64,
 fn shader_cm_blinn_schlick(p: &V3F, n: &V3F, col: &V3F, eye: &P3F, _tick: f64,
                            cm: &IrradianceCMSet) -> V3F {
     let n   = fast_normalize(n);
-    let eye = *p - *eye.as_vec();
+    let eye = *p - *eye.as_vector();
     let r   = reflect(&eye, &n);
     let h   = (n + r) / (n + r).norm();
     let w   = 1.0 - na::clamp(na::dot(&h, &eye), 0.0, 1.0);
@@ -1170,7 +1170,7 @@ fn shader_by_idx<'a>(idx: i32) -> (&'a str, bool, Shader) {
 //
 
 struct TransformedVertex {
-    vp:    Pnt4<f32>, // Projected, perspective divided, viewport transformed vertex with W
+    vp:    Point4<f32>, // Projected, perspective divided, viewport transformed vertex with W
                       // (note that we actually store 1/W in the last component)
     world: V3F,       // World space vertex and normal for lighting computations etc.
     n:     V3F,       // ...
@@ -1179,7 +1179,7 @@ struct TransformedVertex {
 
 fn transform_vertices(vtx_in: &[Vertex],
                       vtx_out: &mut [TransformedVertex],
-                      normalize_mesh_dimensions: &Mat4<f32>,
+                      normalize_mesh_dimensions: &Matrix4<f32>,
                       w: i32,
                       h: i32,
                       eye: &P3F) {
@@ -1187,26 +1187,26 @@ fn transform_vertices(vtx_in: &[Vertex],
 
     // Build transformations (TODO: We do this for each chunk of vertices processed)
     let mesh_to_world       = *normalize_mesh_dimensions;
-    let world_to_view       = look_at(eye, &Pnt3::new(0.0, 0.0, 0.0), &Vec3::y());
+    let world_to_view       = look_at(eye, &Point3::new(0.0, 0.0, 0.0), &Vector3::y());
     let view_to_proj        = perspective(45.0, w as f32 / h as f32, 0.1, 10.0);
     let wh                  = w as f32 / 2.0;
     let hh                  = h as f32 / 2.0;
                               // TODO: We're applying the viewport transform before the
                               //       perspective divide, why does this actually work
                               //       identically to doing it right after it below?
-    let proj_to_vp          = Mat4::new(wh,  0.0, 0.0, wh,
-                                        0.0, hh,  0.0, hh,
-                                        0.0, 0.0, 1.0, 0.0,
-                                        0.0, 0.0, 0.0, 1.0);
+    let proj_to_vp          = Matrix4::new(wh,  0.0, 0.0, wh,
+                                           0.0, hh,  0.0, hh,
+                                           0.0, 0.0, 1.0, 0.0,
+                                           0.0, 0.0, 0.0, 1.0);
     let world_to_vp         = proj_to_vp * view_to_proj * world_to_view;
-    let mesh_to_world_it_33 = na::from_homogeneous::<Mat4<f32>, Mat3<f32>>
-                                  (&mesh_to_world.inv().unwrap().transpose());
+    let mesh_to_world_it_33 = na::from_homogeneous::<Matrix4<f32>, Matrix3<f32>>
+                                  (&mesh_to_world.inverse().unwrap().transpose());
 
     // Transform and copy into target slice instead of copy and transform in-place
     for (src, dst) in vtx_in.iter().zip(vtx_out.iter_mut()) {
         // Transform from mesh into world space
-        let world_h: Pnt4<f32> = mesh_to_world * na::to_homogeneous(&src.p);
-        dst.world = Vec3::new(world_h.x, world_h.y, world_h.z);
+        let world_h: Point4<f32> = mesh_to_world * na::to_homogeneous(&src.p);
+        dst.world = Vector3::new(world_h.x, world_h.y, world_h.z);
 
         // World to viewport. Note that we do the perspective divide manually instead of using
         //   dst = na::from_homogeneous(&(transf * na::to_homogeneous(&src)));
@@ -1229,22 +1229,22 @@ fn transform_vertices(vtx_in: &[Vertex],
     }
 }
 
-// The camera related functions in nalgebra like Iso3::look_at_z() and PerspMat3::new()
+// The camera related functions in nalgebra like Isometry3::look_at_z() and PerspMat3::new()
 // are all using some rather unusual conventions and are not documented. Replace them with
 // custom variants that work like the usual OpenGL style versions
 
-fn look_at(eye: &P3F, at: &P3F, up: &V3F) -> Mat4<f32> {
+fn look_at(eye: &P3F, at: &P3F, up: &V3F) -> Matrix4<f32> {
     let zaxis = na::normalize(&(*eye - *at));
     let xaxis = na::normalize(&na::cross(up, &zaxis));
     let yaxis = na::cross(&zaxis, &xaxis);
 
-    Mat4::new(xaxis.x, xaxis.y, xaxis.z, na::dot(&-eye.to_vec(), &xaxis),
-              yaxis.x, yaxis.y, yaxis.z, na::dot(&-eye.to_vec(), &yaxis),
-              zaxis.x, zaxis.y, zaxis.z, na::dot(&-eye.to_vec(), &zaxis),
-              0.0,     0.0,     0.0,     1.0)
+    Matrix4::new(xaxis.x, xaxis.y, xaxis.z, na::dot(&-eye.to_vector(), &xaxis),
+                 yaxis.x, yaxis.y, yaxis.z, na::dot(&-eye.to_vector(), &yaxis),
+                 zaxis.x, zaxis.y, zaxis.z, na::dot(&-eye.to_vector(), &zaxis),
+                 0.0,     0.0,     0.0,     1.0)
 }
 
-fn perspective(fovy_deg: f32, aspect: f32, near: f32, far: f32) -> Mat4<f32> {
+fn perspective(fovy_deg: f32, aspect: f32, near: f32, far: f32) -> Matrix4<f32> {
     let tan_half_fovy = (deg_to_rad(fovy_deg) / 2.0).tan();
     let m00 = 1.0 / (aspect * tan_half_fovy);
     let m11 = 1.0 / tan_half_fovy;
@@ -1252,10 +1252,10 @@ fn perspective(fovy_deg: f32, aspect: f32, near: f32, far: f32) -> Mat4<f32> {
     let m23 = -(2.0 * far * near) / (far - near);
     let m32 = -1.0;
 
-    Mat4::new(m00, 0.0, 0.0, 0.0,
-              0.0, m11, 0.0, 0.0,
-              0.0, 0.0, m22, m23,
-              0.0, 0.0, m32, 0.0)
+    Matrix4::new(m00, 0.0, 0.0, 0.0,
+                 0.0, m11, 0.0, 0.0,
+                 0.0, 0.0, m22, m23,
+                 0.0, 0.0, m32, 0.0)
 }
 
 //
@@ -1273,11 +1273,11 @@ fn draw_bg_gradient(bg_idx: i32, w: i32, h: i32, fb: *mut u32) {
     let start;
     let end;
     match bg_idx {
-        0 => { start = Vec3::new(0.3, 0.3, 0.3); end = Vec3::new(0.7, 0.7, 0.7); }
-        1 => { start = Vec3::new(1.0, 0.4, 0.0); end = Vec3::new(0.0, 0.5, 0.5); }
-        2 => { start = Vec3::new(1.0, 0.0, 1.0); end = Vec3::new(1.0, 0.0, 1.0); }
-        3 => { start = Vec3::new(1.0, 1.0, 1.0); end = Vec3::new(1.0, 1.0, 1.0); }
-        4 => { start = Vec3::new(0.0, 0.0, 0.0); end = Vec3::new(0.0, 0.0, 0.0); }
+        0 => { start = Vector3::new(0.3, 0.3, 0.3); end = Vector3::new(0.7, 0.7, 0.7); }
+        1 => { start = Vector3::new(1.0, 0.4, 0.0); end = Vector3::new(0.0, 0.5, 0.5); }
+        2 => { start = Vector3::new(1.0, 0.0, 1.0); end = Vector3::new(1.0, 0.0, 1.0); }
+        3 => { start = Vector3::new(1.0, 1.0, 1.0); end = Vector3::new(1.0, 1.0, 1.0); }
+        4 => { start = Vector3::new(0.0, 0.0, 0.0); end = Vector3::new(0.0, 0.0, 0.0); }
         _ => panic!("draw_bg_gradient: Invalid index: {}", bg_idx)
     }
 
